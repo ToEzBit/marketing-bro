@@ -1,0 +1,35 @@
+{
+  "name": "discord-claude-agent-bot",
+  "version": "1.0.0",
+  "description": "Discord bot that runs Claude Code on the host machine, billed to a Claude subscription",
+  "main": "dist/index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "doctor": "tsx src/doctor.ts",
+    "test": "tsx src/policy.test.ts",
+    "whoami": "tsx src/whoami.ts",
+    "test:agent": "tsx src/attachment.test.ts"
+  },
+  "type": "module",
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.220",
+    "discord.js": "^14.27.0",
+    "dotenv": "^17.4.2",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2"
+  },
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  }
+}
