@@ -3,7 +3,7 @@
 Claude Code ที่สั่งงานผ่าน Discord ได้ — อ่าน/แก้ไฟล์ รันคำสั่ง ค้นเว็บ บนเครื่องที่บอทรันอยู่
 ใช้โควต้าจาก **Claude subscription** (Pro/Max) ไม่ต้องใช้ API key แบบจ่ายตามโทเค็น
 
-รองรับ macOS และ Windows (โค้ดชุดเดียว รันทีละเครื่อง)
+รองรับ macOS และ Linux (โค้ดชุดเดียว รันทีละเครื่อง)
 
 ---
 
@@ -175,10 +175,7 @@ npm start          # รันจาก dist/
 ## รันค้างไว้
 
 - **macOS** — `launchd` plist หรือ `pm2 start dist/index.js --name claude-bot`
-- **Windows** — Task Scheduler (ตั้ง "Run whether user is logged on or not") หรือ `pm2`
-
-หมายเหตุ Windows: เครื่องมือ Bash ของ Claude Code ต้องมี shell ที่ใช้ได้ (Git Bash
-หรือ WSL) ถ้าคำสั่ง shell ล้มเหลวทั้งหมด ให้ติดตั้ง Git for Windows ก่อน
+- **Linux** — systemd service (ตั้ง `Restart=always`) หรือ `pm2`
 
 ## ข้อจำกัดที่รู้อยู่
 

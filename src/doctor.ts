@@ -61,8 +61,8 @@ async function main(): Promise<void> {
   const chromePath =
     platform() === "darwin"
       ? "/Applications/Google Chrome.app"
-      : platform() === "win32"
-        ? "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+      : platform() === "linux"
+        ? "/opt/google/chrome/chrome"
         : "";
   if (chromePath) {
     report(

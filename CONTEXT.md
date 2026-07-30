@@ -4,7 +4,7 @@ Glossary ของโปรเจกต์ (ภาษากลางที่ใ
 
 ## Terms
 
-- **Host** — เครื่องคอมพิวเตอร์ (macOS หรือ Windows) ที่บอทรันอยู่ และเป็นเครื่องที่ Agent ทำงานจริง (อ่าน/เขียนไฟล์, รันคำสั่ง) รันทีละ 1 เครื่องต่อ 1 Discord bot token
+- **Host** — เครื่องคอมพิวเตอร์ (macOS หรือ Linux) ที่บอทรันอยู่ และเป็นเครื่องที่ Agent ทำงานจริง (อ่าน/เขียนไฟล์, รันคำสั่ง) รันทีละ 1 เครื่องต่อ 1 Discord bot token
 - **Operator** — เจ้าของ subscription และเครื่อง Host (ผู้ตั้งบอท) มีสิทธิ์สูงสุด
 - **Member** — สมาชิกทีมภายในที่อยู่ใน allowlist (Discord user ID) สั่งงานบอทได้
 - **Task** — งานหนึ่งชิ้นที่ Member สั่งผ่าน Discord แต่ละ Task ผูกกับ Discord thread หนึ่งอัน และ Agent Session หนึ่งอัน (1 Task = 1 Thread = 1 Session)

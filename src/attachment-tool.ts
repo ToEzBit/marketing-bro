@@ -81,7 +81,7 @@ export function createDiscordToolServer(options: {
                 `upload limit, so it was not sent. Shrink it to a temporary copy and send that ` +
                 `instead — for an image on macOS: ` +
                 `\`sips -Z 2000 "${target}" --out /tmp/${basename(target)}\`; ` +
-                `on Windows or Linux use an equivalent resize. Then call send_file on the copy.`,
+                `on Linux use an equivalent resize (e.g. ImageMagick \`convert\`). Then call send_file on the copy.`,
             },
           ],
           isError: true,

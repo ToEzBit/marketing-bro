@@ -17,7 +17,7 @@ Status: accepted (2026-07-30)
 ## Consequences
 
 - ✅ ตอบโจทย์ subscription เป็นข้อบังคับหลัก และได้ tools + permission callback (`canUseTool`) ฟรี ไม่ต้องเขียน harness เอง
-- ✅ Cross-platform: Claude Code รองรับ Windows native และ macOS
+- ✅ Cross-platform: Claude Code รองรับ macOS และ Linux
 - ⚠️ ToS: ห้ามเปิดให้บุคคลภายนอกใช้ rate limit ของ subscription — ต้องมี allowlist ของ Discord user ID (ทีมภายในเท่านั้น) ห้ามเปิด public
 - ⚠️ Token หมดอายุทุก 1 ปี ต้อง regenerate
 - ⚠️ โควต้าเป็นของ subscription เดียว แชร์ทั้งทีม — default model เป็น Sonnet เพื่อประหยัดโควต้า
