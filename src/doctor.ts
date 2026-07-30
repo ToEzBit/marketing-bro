@@ -4,7 +4,8 @@
  * works, before Discord is involved at all.
  */
 import { existsSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+import { createRequire } from "node:module";
+import { homedir, platform } from "node:os";
 import { config as loadEnv } from "dotenv";
 import { query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { expandPath } from "./config.js";
@@ -49,6 +50,37 @@ async function main(): Promise<void> {
   for (const name of ["DISCORD_TOKEN", "DISCORD_APP_ID", "OPERATOR_USER_ID"]) {
     report(Boolean(process.env[name]?.trim()), name);
   }
+
+  console.log("\n— browser —");
+  try {
+    createRequire(import.meta.url).resolve("@playwright/mcp/package.json");
+    report(true, "@playwright/mcp");
+  } catch {
+    report(false, "@playwright/mcp", "not installed — run `npm install`");
+  }
+  const chromePath =
+    platform() === "darwin"
+      ? "/Applications/Google Chrome.app"
+      : platform() === "win32"
+        ? "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+        : "";
+  if (chromePath) {
+    report(
+      existsSync(chromePath),
+      "Google Chrome",
+      existsSync(chromePath)
+        ? chromePath
+        : "not found — the agent's browser runs on the chrome channel (ADR 0003)",
+    );
+  }
+  const profileDir = expandPath(process.env.BROWSER_PROFILE_DIR ?? "./.state/browser-profile");
+  report(
+    true,
+    "browser profile",
+    existsSync(profileDir)
+      ? profileDir
+      : `${profileDir} (ยังไม่มี — รัน \`npm run browser:login\` เพื่อล็อกอินครั้งแรก)`,
+  );
 
   console.log("\n— agent —");
   console.log("starting a one-turn query (no tools, no file access)…");

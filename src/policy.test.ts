@@ -4,7 +4,13 @@
  * destructive shell commands without a human.
  */
 import assert from "node:assert/strict";
-import { decide } from "./policy.js";
+import {
+  BROWSER_UNSAFE_CODE_TOOL,
+  BROWSER_UPLOAD_TOOL,
+  decide,
+  decideBrowser,
+  isBrowserTool,
+} from "./policy.js";
 
 let failures = 0;
 
@@ -19,7 +25,7 @@ function check(label: string, fn: () => void): void {
   }
 }
 
-function bash(command: string, extra: string[] = []): "allow" | "ask" {
+function bash(command: string, extra: string[] = []): "allow" | "ask" | "deny" {
   return decide("Bash", { command }, extra).action;
 }
 
@@ -202,6 +208,42 @@ check("unknown MCP tool asks", () =>
   assert.equal(decide("mcp__deploy__ship", {}, []).action, "ask"),
 );
 check("empty Bash command asks", () => assert.equal(bash(""), "ask"));
+
+console.log("browser (ADR 0003): one approval per task, uploads always ask, no queueing");
+const NAVIGATE = "mcp__browser__browser_navigate";
+const free = { heldBy: undefined, requester: "task-a" };
+const heldBySelf = { heldBy: "task-a", requester: "task-a" };
+const heldByOther = { heldBy: "task-b", requester: "task-a" };
+check("first browser call in a task asks", () =>
+  assert.equal(decideBrowser(NAVIGATE, free).action, "ask"),
+);
+check("browser call flows once the task holds the browser", () =>
+  assert.equal(decideBrowser(NAVIGATE, heldBySelf).action, "allow"),
+);
+check("browser call is denied while another task holds the browser", () =>
+  assert.equal(decideBrowser(NAVIGATE, heldByOther).action, "deny"),
+);
+check("file upload asks even for the task holding the browser", () =>
+  assert.equal(decideBrowser(BROWSER_UPLOAD_TOOL, heldBySelf).action, "ask"),
+);
+check("file upload asks on first browser use too", () =>
+  assert.equal(decideBrowser(BROWSER_UPLOAD_TOOL, free).action, "ask"),
+);
+check("file upload is denied while another task holds the browser", () =>
+  assert.equal(decideBrowser(BROWSER_UPLOAD_TOOL, heldByOther).action, "deny"),
+);
+check("run_code_unsafe asks even for the task holding the browser (host-level code)", () =>
+  assert.equal(decideBrowser(BROWSER_UNSAFE_CODE_TOOL, heldBySelf).action, "ask"),
+);
+check("browser tools are recognised by prefix", () => {
+  assert.equal(isBrowserTool(NAVIGATE), true);
+  assert.equal(isBrowserTool(BROWSER_UPLOAD_TOOL), true);
+  assert.equal(isBrowserTool("mcp__discord__send_file"), false);
+  assert.equal(isBrowserTool("Bash"), false);
+});
+check("a browser tool that slips past the router still asks", () =>
+  assert.equal(decide(NAVIGATE, {}, []).action, "ask"),
+);
 
 console.log(failures === 0 ? "\nall policy checks passed" : `\n${failures} check(s) failed`);
 process.exit(failures === 0 ? 0 : 1);

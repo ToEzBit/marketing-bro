@@ -16,8 +16,9 @@ import {
   type TurnSummary,
 } from "./agent-session.js";
 import { SEND_FILE_TOOL } from "./attachment-tool.js";
+import { playwrightMcpArgs } from "./browser.js";
 import { expandPath, type Config } from "./config.js";
-import { decide } from "./policy.js";
+import { decide, decideBrowser, isBrowserTool } from "./policy.js";
 import { registerCommands } from "./discord/commands.js";
 import { requestApproval } from "./discord/approval.js";
 import { ThreadReporter, describeTool, truncate, type Postable } from "./discord/render.js";
@@ -41,6 +42,11 @@ export class Bot {
   /** `/ask` sessions, which live outside the per-thread map but still need closing. */
   private readonly transientSessions = new Set<AgentSession>();
   private idleSweeper: NodeJS.Timeout | undefined;
+  /**
+   * Thread id of the task holding the browser (ADR 0003). The profile allows
+   * one Chrome instance, so this is a whole-bot lock, released with the session.
+   */
+  private browserHolder: string | undefined;
 
   constructor(private readonly config: Config) {
     this.store = new TaskStore(config.sessionStatePath);
@@ -350,6 +356,16 @@ export class Bot {
         model: record.model,
         oauthToken: this.config.oauthToken,
         ...(record.sessionId ? { resumeSessionId: record.sessionId } : {}),
+        // Headed Chrome on a shared persistent profile (ADR 0003). Screenshots
+        // and downloads land in the workspace, where send_file can reach them.
+        browserServer: {
+          type: "stdio",
+          command: process.execPath,
+          args: playwrightMcpArgs({
+            profileDir: this.config.browserProfileDir,
+            outputDir: record.workspace,
+          }),
+        },
       },
       this.buildHooks({ reporter, channel: thread, record, persist: true }),
     );
@@ -374,10 +390,13 @@ export class Bot {
       onSessionId: async (sessionId) => {
         if (persist) await this.store.setSessionId(record.threadId, sessionId);
       },
-      decide: (toolName, input) => decide(toolName, input, this.config.extraBashAllow),
+      decide: (toolName, input) =>
+        isBrowserTool(toolName)
+          ? decideBrowser(toolName, { heldBy: this.browserHolder, requester: record.threadId })
+          : decide(toolName, input, this.config.extraBashAllow),
       onApprovalNeeded: async (request) => {
         reporter.addActivity(`ขออนุมัติ ${request.toolName} ${describeTool(request.toolName, request.input)}`);
-        return await requestApproval({
+        const result = await requestApproval({
           thread: channel,
           toolName: request.toolName,
           input: request.input,
@@ -390,6 +409,15 @@ export class Bot {
           timeoutMs: this.config.approvalTimeoutMs,
           signal: request.signal,
         });
+        if (isBrowserTool(request.toolName) && result.behavior === "allow") {
+          // Another task can win the browser while this prompt sits open;
+          // re-check before taking it so two tasks never hold one profile.
+          if (this.browserHolder !== undefined && this.browserHolder !== record.threadId) {
+            return { behavior: "deny", message: `browser is in use by task ${this.browserHolder}` };
+          }
+          this.browserHolder = record.threadId;
+        }
+        return result;
       },
       onSendFile: async (buffer, filename, caption) => {
         await reporter.attach(buffer, filename, caption);
@@ -402,6 +430,7 @@ export class Bot {
         const detail = error instanceof Error ? error.message : String(error);
         console.error(`[bot] session died (resuming=${wasResuming}):`, error);
         this.sessions.delete(record.threadId);
+        this.releaseBrowser(record.threadId);
         await reporter.clearStatus();
 
         if (wasResuming && persist) {
@@ -429,8 +458,14 @@ export class Bot {
     const live = this.sessions.get(threadId);
     if (!live) return;
     this.sessions.delete(threadId);
+    this.releaseBrowser(threadId);
     await live.reporter.clearStatus();
     await live.session.close();
+  }
+
+  /** Closing the session kills its Playwright subprocess, so Chrome is gone too. */
+  private releaseBrowser(threadId: string): void {
+    if (this.browserHolder === threadId) this.browserHolder = undefined;
   }
 }
 

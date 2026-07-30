@@ -269,7 +269,61 @@ const SUBCOMMAND_GUARDS: Record<string, Record<string, (args: string[]) => boole
 
 export type Decision =
   | { action: "allow"; reason: string }
-  | { action: "ask"; reason: string };
+  | { action: "ask"; reason: string }
+  | { action: "deny"; reason: string };
+
+/**
+ * The Playwright MCP server is registered under this key, so every browser
+ * tool arrives here named `mcp__browser__browser_*`.
+ */
+export const BROWSER_MCP_NAME = "browser";
+const BROWSER_TOOL_PREFIX = `mcp__${BROWSER_MCP_NAME}__`;
+
+/** Moves a file off this host into a web page. */
+export const BROWSER_UPLOAD_TOOL = `${BROWSER_TOOL_PREFIX}browser_file_upload`;
+
+/**
+ * Runs arbitrary JavaScript in the MCP server's Node process — host-level
+ * code execution, not a browser action. One browser approval must not open
+ * a path around the Bash allowlist.
+ */
+export const BROWSER_UNSAFE_CODE_TOOL = `${BROWSER_TOOL_PREFIX}browser_run_code_unsafe`;
+
+/** Browser tools that escape the browser's scope and touch the host itself. */
+const BROWSER_ALWAYS_ASK = new Set([BROWSER_UPLOAD_TOOL, BROWSER_UNSAFE_CODE_TOOL]);
+
+export function isBrowserTool(toolName: string): boolean {
+  return toolName.startsWith(BROWSER_TOOL_PREFIX);
+}
+
+/**
+ * ADR 0003: the browser is a single shared resource whose profile carries the
+ * operator's logins. The first browser call in a task asks a human once; the
+ * task then holds the browser and later calls flow. A task that wants it while
+ * another holds it is denied, not queued. Tools that reach past the browser
+ * onto the host (file upload, arbitrary code) ask every time.
+ */
+export function decideBrowser(
+  toolName: string,
+  browser: { heldBy: string | undefined; requester: string },
+): Decision {
+  if (browser.heldBy !== undefined && browser.heldBy !== browser.requester) {
+    return { action: "deny", reason: `browser is in use by task ${browser.heldBy}` };
+  }
+  if (BROWSER_ALWAYS_ASK.has(toolName)) {
+    return {
+      action: "ask",
+      reason:
+        toolName === BROWSER_UPLOAD_TOOL
+          ? "uploads a file from this host to a web page"
+          : "runs arbitrary code on this host, outside the browser",
+    };
+  }
+  if (browser.heldBy === browser.requester) {
+    return { action: "allow", reason: "browser already approved for this task" };
+  }
+  return { action: "ask", reason: "first browser use in this task" };
+}
 
 function tokenize(segment: string): string[] {
   return segment.trim().split(/\s+/).filter(Boolean);

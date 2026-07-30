@@ -1,6 +1,7 @@
 import {
   query,
   type CanUseTool,
+  type McpServerConfig,
   type Options,
   type PermissionResult,
   type Query,
@@ -8,6 +9,7 @@ import {
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { createDiscordToolServer, type SendFile } from "./attachment-tool.js";
+import { BROWSER_MCP_NAME } from "./policy.js";
 
 /**
  * The agent's default assumption is a terminal where the user sees tool output.
@@ -19,6 +21,16 @@ const DISCORD_CONTEXT = `You are running as a Discord bot. The person you are ta
 Showing a file to the user means calling the \`mcp__discord__send_file\` tool with its path. Reading a file only shows it to you. Whenever the user asks to see, show, open, view, display, or send a file — an image, screenshot, PDF, chart, or any generated output — call \`mcp__discord__send_file\`. Do not answer such a request by describing the file in words; describe it only if they also ask what it contains, or after you have sent it.
 
 Formatting: your messages render as Discord markdown. Bold, italics, inline code, code fences, and links work. Headings, tables, and footnotes do not — use short paragraphs and bullet lists instead. Keep individual messages under about 1500 characters; longer prose is automatically split or attached as a file.`;
+
+/**
+ * Appended when the session has browser tools. The profile carries real
+ * logins, so the agent is told to treat them as the operator's property.
+ */
+const BROWSER_CONTEXT = `
+
+You have browser tools (mcp__${BROWSER_MCP_NAME}__*) that drive a real, visible Chrome window on this machine. Its profile keeps the operator's logins (image-generation sites, social accounts) between tasks — use existing sessions, never log out of anything, and never change account settings unless that is the task. Screenshots are saved into the workspace; use mcp__discord__send_file to show them to the user.
+
+If the browser fails to launch with a ProcessSingleton or "profile already in use" error, the profile is open elsewhere — tell the user to close the window left open by \`npm run browser:login\`, or to wait for the other task using the browser, then try again. Do not work around it by launching a browser yourself through Bash.`;
 
 /** Content block shapes we render. Narrower than the SDK's full union. */
 type ContentBlock =
@@ -66,11 +78,14 @@ export type SessionHooks = {
   onApprovalNeeded: (request: ToolApprovalRequest) => Promise<PermissionResult>;
   /** Puts a file into the conversation as a real Discord attachment. */
   onSendFile: SendFile;
-  /** Auto-approve or escalate, without asking a human. */
+  /** Auto-approve, refuse outright, or escalate to a human. */
   decide: (
     toolName: string,
     input: Record<string, unknown>,
-  ) => { action: "allow"; reason: string } | { action: "ask"; reason: string };
+  ) =>
+    | { action: "allow"; reason: string }
+    | { action: "ask"; reason: string }
+    | { action: "deny"; reason: string };
 };
 
 export type SessionConfig = {
@@ -81,6 +96,8 @@ export type SessionConfig = {
   resumeSessionId?: string;
   /** Restrict the agent to these tools. Omit for the full Claude Code toolset. */
   allowedTools?: string[];
+  /** Playwright MCP server config. Omit and the session has no browser. */
+  browserServer?: McpServerConfig;
 };
 
 /** Async queue that feeds user messages into a streaming-input query. */
@@ -219,7 +236,11 @@ export class AgentSession {
     return {
       cwd: this.config.workspace,
       model: this.config.model,
-      systemPrompt: { type: "preset", preset: "claude_code", append: DISCORD_CONTEXT },
+      systemPrompt: {
+        type: "preset",
+        preset: "claude_code",
+        append: this.config.browserServer ? DISCORD_CONTEXT + BROWSER_CONTEXT : DISCORD_CONTEXT,
+      },
       // Load the project's own settings and CLAUDE.md, but not the operator's
       // personal ~/.claude config — a bot should have a predictable tool set,
       // not whatever plugins and MCP servers happen to be on this machine.
@@ -236,6 +257,9 @@ export class AgentSession {
           workspace: this.config.workspace,
           sendFile: this.hooks.onSendFile,
         }),
+        ...(this.config.browserServer
+          ? { [BROWSER_MCP_NAME]: this.config.browserServer }
+          : {}),
       },
       ...(this.config.resumeSessionId ? { resume: this.config.resumeSessionId } : {}),
       ...(this.config.allowedTools ? { allowedTools: this.config.allowedTools } : {}),
@@ -258,6 +282,10 @@ export class AgentSession {
     if (verdict.action === "allow") {
       this.hooks.onActivity(`auto-approved ${toolName}`);
       return { behavior: "allow" };
+    }
+    if (verdict.action === "deny") {
+      this.hooks.onActivity(`denied ${toolName} — ${verdict.reason}`);
+      return { behavior: "deny", message: verdict.reason };
     }
 
     this.hooks.onHeadline("รออนุมัติจากผู้ใช้");
