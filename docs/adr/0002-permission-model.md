@@ -19,7 +19,12 @@ Status: accepted (2026-07-30)
 - `canUseTool` รับทุกเคสที่ Claude Code จะถาม แล้ว `src/policy.ts` ตัดสินอีกชั้น:
   คำสั่ง shell แบบอ่านล้วนผ่านอัตโนมัติ ที่เหลือส่งขึ้นปุ่มใน Discord
 - Allowlist ตรวจถึงระดับ flag ด้วย เพราะคำสั่งที่อยู่ใน allowlist เองยังเขียนไฟล์ได้
-  (`find -exec`, `sort -o`, `git branch -D`, `git tag v1`, `git remote add`)
+  (`find -exec`, `sort -o`, `tree -o`, `git branch -D`, `git tag v1`, `git remote add`,
+  `git stash`, `git worktree add`) หรือรันคำสั่งที่ allowlist ไม่เคยเห็น (`env rm -rf x`,
+  `git grep -O'sh -c ...'`)
+- redirect ที่ "ทิ้ง" output (`>/dev/null`, `2>/dev/null`, `2>&1`) ถูกตัดออกก่อนตรวจ syntax
+  เพราะ /dev/null เก็บอะไรไม่ได้ และการปิดเสียง stderr เป็นวิธีเขียนคำสั่งอ่านตามปกติ
+  redirect ที่ชี้ไปที่อื่นทุกแบบยังคงต้องขออนุมัติ — ห้ามขยายข้อยกเว้นนี้เป็น "redirect ผ่านได้"
 
 ## Verification
 

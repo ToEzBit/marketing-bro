@@ -37,6 +37,52 @@ for (const command of [
   "git status | head -20",
   "wc -l src/*.ts",
   "git config --get user.email",
+  // System and process inspection.
+  "ps aux",
+  "ps aux | grep node",
+  "lsof -i :3000",
+  "uname -a",
+  "sw_vers",
+  "id -un",
+  "groups",
+  "arch",
+  // Text shaping that only ever writes to stdout.
+  "nl -ba src/policy.ts",
+  "tr -d '\\r'",
+  "rev",
+  "column -t",
+  "comm -12 a b",
+  "paste a b",
+  "readlink -f src",
+  "shasum -a 256 package.json",
+  "cksum package.json",
+  // More of git's read surface.
+  "git reflog",
+  "git reflog -n 5",
+  "git reflog show main",
+  "deno lint",
+  "cargo clippy",
+  "git stash list",
+  "git worktree list",
+  "git ls-remote --heads origin",
+  "git for-each-ref --format='%(refname)'",
+  "git merge-base main HEAD",
+  "git cat-file -p HEAD",
+  "git diff-tree --no-commit-id --name-only HEAD",
+  "git grep -n TODO",
+  "git check-ignore -v node_modules",
+  // Version probes for the runtimes we already know about.
+  "bun --version",
+  "deno --version",
+  "env",
+  "tree -L 2",
+  // Silencing a stream is not storing it — /dev/null keeps nothing.
+  "find ~/Desktop ~/Downloads -iname '*.png' 2>/dev/null",
+  "ls -la /nope 2>/dev/null",
+  "grep -r TODO src >/dev/null",
+  "cat missing &>/dev/null",
+  "git status 2>&1 | head -5",
+  "find . -name '*.ts' >/dev/null 2>&1",
 ]) {
   check(command, () => assert.equal(bash(command), "allow"));
 }
@@ -70,6 +116,41 @@ for (const command of [
   "git tag -d v1.0.0",
   "git remote add evil https://example.com/x.git",
   "git remote set-url origin https://example.com/x.git",
+  // `env` is an exec wrapper, not a printer: anything after it is a new command
+  // that never went through this allowlist.
+  "env rm -rf build",
+  "env FOO=1 bash -c 'rm -rf /'",
+  // tree writes its listing to a file with -o.
+  "tree -o /etc/hosts",
+  "tree -L 2 -o out.txt",
+  // Plain `git stash` stashes; only `list`/`show` read.
+  "git stash",
+  "git stash pop",
+  "git worktree add ../wt main",
+  "git worktree remove ../wt",
+  // `--output=<file>` writes the diff instead of printing it, on every
+  // subcommand that takes git's diff options.
+  "git log --output=/etc/hosts",
+  "git diff --output /tmp/x",
+  "git show HEAD --output=/tmp/x",
+  "git diff-tree --output=/tmp/x HEAD",
+  // `git grep -O<cmd>` runs <cmd> on every match.
+  "git grep -O'sh -c \"rm -rf /\"' TODO",
+  "git grep -nO sh TODO",
+  "git grep --open-files-in-pager=sh TODO",
+  // The /dev/null carve-out must not become a general redirect carve-out.
+  "ls > out.txt 2>/dev/null",
+  "cat secrets 2>/dev/null > /tmp/stolen",
+  "ls >/dev/null/../../tmp/x",
+  "ls >/dev/nullx",
+  "ls >&outfile",
+  "echo hi > /dev/nul",
+  // `git reflog expire|delete` destroys the recovery log.
+  "git reflog expire --expire=now --all",
+  "git reflog delete HEAD@{1}",
+  // Linters that rewrite source when asked to.
+  "deno lint --fix",
+  "cargo clippy --fix",
 ] ) {
   check(command, () => assert.equal(bash(command), "ask"));
 }
@@ -82,6 +163,12 @@ for (const command of [
   "git branch -a -v",
   "git tag --list",
   "git remote -v",
+  "git stash list",
+  "git worktree list",
+  "tree -L 2",
+  "env",
+  // Display-only flags that merely share the --output prefix stay usable.
+  "git log --output-indicator-new=+",
 ]) {
   check(command, () => assert.equal(bash(command), "allow"));
 }
