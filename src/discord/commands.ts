@@ -47,6 +47,85 @@ export function buildCommands(): RESTPostAPIApplicationCommandsJSONBody[] {
         .setMaxLength(1800),
     );
 
+  const schedule = new SlashCommandBuilder()
+    .setName("schedule")
+    .setDescription("งานตั้งเวลา — รันซ้ำเองตามรอบโดยไม่ต้องมีคนสั่ง (ADR 0004)")
+    .addSubcommand((sub) =>
+      sub
+        .setName("create")
+        .setDescription("ตั้งงานใหม่ให้รันซ้ำตามรอบเวลา")
+        .addStringOption((option) =>
+          option
+            .setName("prompt")
+            .setDescription("สิ่งที่ให้ทำทุกรอบ")
+            .setRequired(true)
+            .setMaxLength(1800),
+        )
+        .addStringOption((option) =>
+          option
+            .setName("every")
+            .setDescription("รอบเวลา เช่น 30m, 2h หรือ 3d (เป็นวันต้องใส่ at ด้วย)"),
+        )
+        .addStringOption((option) =>
+          option
+            .setName("at")
+            .setDescription("เวลายิงแบบ 24 ชม. เช่น 08:00 (ใส่เดี่ยว ๆ = ทุกวัน)"),
+        )
+        .addStringOption((option) =>
+          option
+            .setName("days")
+            .setDescription("วันในสัปดาห์ เช่น mon,wed,fri (ต้องใส่ at ด้วย)"),
+        )
+        .addStringOption((option) =>
+          option
+            .setName("path")
+            .setDescription("โฟลเดอร์ที่จะทำงาน (ไม่ระบุ = workspace เริ่มต้น)"),
+        )
+        .addStringOption((option) =>
+          option.setName("model").setDescription("โมเดลที่ใช้").addChoices(...MODEL_CHOICES),
+        )
+        .addBooleanOption((option) =>
+          option
+            .setName("browser")
+            .setDescription("มอบสิทธิ์ใช้ browser (บัญชีที่ล็อกอินค้าง) ให้งานนี้ตอนรันอัตโนมัติ"),
+        ),
+    )
+    .addSubcommand((sub) =>
+      sub.setName("list").setDescription("ดู schedule ทั้งหมด"),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("pause")
+        .setDescription("หยุด schedule ชั่วคราว (สมาชิกทุกคนกดได้ — เบรกฉุกเฉิน)")
+        .addStringOption((option) =>
+          option.setName("id").setDescription("id จาก /schedule list").setRequired(true),
+        ),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("resume")
+        .setDescription("ปลุก schedule ที่หยุดไว้ให้กลับมารันตามรอบ")
+        .addStringOption((option) =>
+          option.setName("id").setDescription("id จาก /schedule list").setRequired(true),
+        ),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("delete")
+        .setDescription("ลบ schedule ถาวร (เธรดและประวัติยังอยู่)")
+        .addStringOption((option) =>
+          option.setName("id").setDescription("id จาก /schedule list").setRequired(true),
+        ),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("run")
+        .setDescription("สั่งรันเดี๋ยวนี้ 1 รอบ นอกรอบเวลาปกติ")
+        .addStringOption((option) =>
+          option.setName("id").setDescription("id จาก /schedule list").setRequired(true),
+        ),
+    );
+
   const stop = new SlashCommandBuilder()
     .setName("stop")
     .setDescription("สั่งหยุดงานที่กำลังรันอยู่ใน thread นี้");
@@ -55,7 +134,7 @@ export function buildCommands(): RESTPostAPIApplicationCommandsJSONBody[] {
     .setName("status")
     .setDescription("ดูสถานะบอทและงานที่กำลังรัน");
 
-  return [task, ask, stop, status].map((command) => command.toJSON());
+  return [task, ask, schedule, stop, status].map((command) => command.toJSON());
 }
 
 export async function registerCommands(options: {

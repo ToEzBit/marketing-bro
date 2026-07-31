@@ -9,6 +9,7 @@ Discord bot ที่สั่งงาน Claude Agent SDK บนเครื�
   - [0001](./docs/adr/0001-agent-sdk-with-subscription-token.md) — ทำไมใช้ Agent SDK + subscription token
   - [0002](./docs/adr/0002-permission-model.md) — permission model (allowlist / Approval)
   - [0003](./docs/adr/0003-browser-via-playwright-mcp.md) — Browser ผ่าน Playwright MCP (headed + persistent profile)
+  - [0004](./docs/adr/0004-scheduled-runs-use-grants.md) — Scheduled Run ใช้ Grant ตอนสร้างแทน Approval ตอนรัน
 
 ## คำสั่ง
 
@@ -16,7 +17,7 @@ Discord bot ที่สั่งงาน Claude Agent SDK บนเครื�
 npm run dev        # รันบอทแบบ watch (tsx)
 npm run build      # compile ลง dist/
 npm run typecheck  # tsc --noEmit
-npm test           # policy tests (src/policy.test.ts)
+npm test           # unit tests (policy, recurrence, scheduler)
 npm run doctor     # เช็ค env/config ว่าพร้อมรัน
 npm run browser:login  # เปิด Chrome ด้วย profile ของบอท ให้ Operator ล็อกอินเว็บครั้งแรก
 npm run test:browser   # เช็คว่า login ที่ทำผ่าน browser:login บอทอ่านเห็นจริง (ต้องมี Chrome)

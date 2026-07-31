@@ -8,6 +8,7 @@
  * are waved through, everything else goes to a human.
  */
 
+import { isAbsolute, relative, resolve } from "node:path";
 import { SEND_FILE_TOOL } from "./attachment-tool.js";
 
 /** Tools that only read or search, and never mutate the host. */
@@ -323,6 +324,91 @@ export function decideBrowser(
     return { action: "allow", reason: "browser already approved for this task" };
   }
   return { action: "ask", reason: "first browser use in this task" };
+}
+
+/**
+ * File tools whose write target the bot can see, mapped to the input field
+ * naming it. These are the only writes the workspace boundary can be enforced
+ * on (ADR 0004 records that Bash is out of its reach).
+ */
+const FILE_WRITE_PATH_FIELD: Record<string, string> = {
+  Write: "file_path",
+  Edit: "file_path",
+  NotebookEdit: "notebook_path",
+};
+
+function isInsideWorkspace(path: string, workspace: string): boolean {
+  const absolute = isAbsolute(path) ? path : resolve(workspace, path);
+  const rel = relative(resolve(workspace), resolve(absolute));
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+/**
+ * ADR 0004: a scheduled Run has no human to ask, so every decision resolves to
+ * allow or deny on the spot. The creation-time grant covers reads, Bash, and
+ * writes inside the Workspace; writes outside it and tools this policy does
+ * not recognise are denied outright.
+ */
+export function decideScheduled(
+  toolName: string,
+  input: Record<string, unknown>,
+  workspace: string,
+): Decision {
+  if (READ_ONLY_TOOLS.has(toolName)) {
+    return { action: "allow", reason: `${toolName} only reads` };
+  }
+  if (toolName === SEND_FILE_TOOL) {
+    return { action: "allow", reason: "posts a file into the schedule thread" };
+  }
+  if (toolName === "Bash") {
+    return { action: "allow", reason: "scheduled grant covers Bash" };
+  }
+
+  const pathField = FILE_WRITE_PATH_FIELD[toolName];
+  if (pathField) {
+    const path = typeof input[pathField] === "string" ? (input[pathField] as string) : "";
+    if (path && isInsideWorkspace(path, workspace)) {
+      return { action: "allow", reason: "writes inside the workspace" };
+    }
+    return {
+      action: "deny",
+      reason: "scheduled run เขียนไฟล์ได้เฉพาะใน workspace ของมันเท่านั้น",
+    };
+  }
+
+  return {
+    action: "deny",
+    reason: `${toolName} ไม่ได้รับอนุญาตใน scheduled run — ทำต่อด้วยวิธีอื่นหรือรายงานแทน`,
+  };
+}
+
+/**
+ * ADR 0004: browser access in a scheduled Run comes from the creation-time
+ * grant, not an approval prompt. Upload is part of the grant (posting needs
+ * it); `browser_run_code_unsafe` stays shut because it is host-level code
+ * execution, which no grant covers. The single-browser lock of ADR 0003 still
+ * applies unchanged.
+ */
+export function decideScheduledBrowser(
+  toolName: string,
+  context: { granted: boolean; heldBy: string | undefined; requester: string },
+): Decision {
+  if (!context.granted) {
+    return {
+      action: "deny",
+      reason: "schedule นี้ไม่ได้รับสิทธิ์ browser ตอนสร้าง — ทำงานต่อโดยไม่ใช้ browser หรือรายงานแทน",
+    };
+  }
+  if (context.heldBy !== undefined && context.heldBy !== context.requester) {
+    return { action: "deny", reason: `browser is in use by task ${context.heldBy}` };
+  }
+  if (toolName === BROWSER_UNSAFE_CODE_TOOL) {
+    return {
+      action: "deny",
+      reason: "รันโค้ดระดับ host ผ่าน browser ไม่ได้ใน scheduled run",
+    };
+  }
+  return { action: "allow", reason: "browser granted at schedule creation" };
 }
 
 function tokenize(segment: string): string[] {

@@ -1,13 +1,18 @@
 import { existsSync, statSync } from "node:fs";
 import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   ChannelType,
   Client,
   Events,
   GatewayIntentBits,
   MessageFlags,
   ThreadAutoArchiveDuration,
+  type ButtonInteraction,
   type ChatInputCommandInteraction,
   type Message,
+  type TextChannel,
   type ThreadChannel,
 } from "discord.js";
 import {
@@ -18,10 +23,19 @@ import {
 import { SEND_FILE_TOOL } from "./attachment-tool.js";
 import { playwrightMcpArgs } from "./browser.js";
 import { expandPath, type Config } from "./config.js";
-import { decide, decideBrowser, isBrowserTool } from "./policy.js";
+import {
+  decide,
+  decideBrowser,
+  decideScheduled,
+  decideScheduledBrowser,
+  isBrowserTool,
+} from "./policy.js";
 import { registerCommands } from "./discord/commands.js";
 import { requestApproval } from "./discord/approval.js";
 import { ThreadReporter, describeTool, truncate, type Postable } from "./discord/render.js";
+import { describeRecurrence, nextFireAt, parseRecurrence } from "./recurrence.js";
+import { ScheduleStore, type ScheduleRecord } from "./schedule-store.js";
+import { MAX_CONSECUTIVE_FAILURES, Scheduler, type RunOutcome } from "./scheduler.js";
 import { TaskStore, type TaskRecord } from "./store.js";
 
 type LiveSession = {
@@ -32,6 +46,9 @@ type LiveSession = {
 
 const IDLE_SWEEP_INTERVAL_MS = 5 * 60_000;
 
+/** Button under a skipped/failed round; pressing it reruns that schedule once. */
+const RERUN_BUTTON_PREFIX = "schedule-rerun:";
+
 /** Read-only toolset for `/ask`: look things up and show files, change nothing. */
 const ASK_TOOLS = ["Read", "Glob", "Grep", "WebSearch", "WebFetch", SEND_FILE_TOOL];
 
@@ -41,6 +58,10 @@ export class Bot {
   private readonly sessions = new Map<string, LiveSession>();
   /** `/ask` sessions, which live outside the per-thread map but still need closing. */
   private readonly transientSessions = new Set<AgentSession>();
+  private readonly scheduleStore: ScheduleStore;
+  private readonly scheduler: Scheduler;
+  /** In-flight scheduled Runs, by schedule id, so shutdown can close them. */
+  private readonly scheduleRuns = new Map<string, AgentSession>();
   private idleSweeper: NodeJS.Timeout | undefined;
   /**
    * Thread id of the task holding the browser (ADR 0003). The profile allows
@@ -50,6 +71,21 @@ export class Bot {
 
   constructor(private readonly config: Config) {
     this.store = new TaskStore(config.sessionStatePath);
+    this.scheduleStore = new ScheduleStore(config.scheduleStatePath);
+    this.scheduler = new Scheduler(this.scheduleStore, {
+      canStart: (record) => {
+        if (record.browserGrant && this.browserHolder !== undefined) {
+          return {
+            ok: false,
+            reason: `ข้ามรอบนี้เพราะ Browser ถูกใช้อยู่โดย ${describeHolder(this.browserHolder)}`,
+          };
+        }
+        return { ok: true };
+      },
+      run: (record) => this.runScheduledOnce(record),
+      onSkip: (record, reason) => this.postScheduleSkip(record, reason),
+      onAutoPause: (record) => this.postScheduleAutoPause(record),
+    });
     this.client = new Client({
       intents: [
         GatewayIntentBits.Guilds,
@@ -62,15 +98,25 @@ export class Bot {
 
   async start(): Promise<void> {
     await this.store.load();
+    await this.scheduleStore.load();
     this.validateWorkspace();
 
     this.client.once(Events.ClientReady, (client) => {
       console.log(`[bot] logged in as ${client.user.tag}`);
       console.log(`[bot] default workspace: ${this.config.defaultWorkspace}`);
       console.log(`[bot] allowed users: ${this.config.allowedUserIds.join(", ")}`);
+      // Threads are only reachable once logged in, so the engine starts here.
+      this.scheduler.start();
+      console.log(`[bot] scheduler started with ${this.scheduleStore.all().length} schedule(s)`);
     });
 
     this.client.on(Events.InteractionCreate, (interaction) => {
+      if (interaction.isButton() && interaction.customId.startsWith(RERUN_BUTTON_PREFIX)) {
+        void this.onRerunButton(interaction).catch((error: unknown) => {
+          console.error("[bot] rerun button failed:", error);
+        });
+        return;
+      }
       if (!interaction.isChatInputCommand()) return;
       void this.onCommand(interaction).catch((error: unknown) => {
         console.error("[bot] command failed:", error);
@@ -107,11 +153,14 @@ export class Bot {
   async shutdown(): Promise<void> {
     console.log("[bot] shutting down…");
     if (this.idleSweeper) clearInterval(this.idleSweeper);
+    this.scheduler.stop();
     await Promise.allSettled([
       ...[...this.sessions.keys()].map((id) => this.closeSession(id)),
       ...[...this.transientSessions].map((session) => session.close()),
+      ...[...this.scheduleRuns.values()].map((session) => session.close()),
     ]);
     this.transientSessions.clear();
+    this.scheduleRuns.clear();
     await this.client.destroy();
   }
 
@@ -152,6 +201,9 @@ export class Bot {
       case "ask":
         await this.onAsk(interaction);
         return;
+      case "schedule":
+        await this.onSchedule(interaction);
+        return;
       case "stop":
         await this.onStop(interaction);
         return;
@@ -176,6 +228,14 @@ export class Bot {
   }
 
   private async onTask(interaction: ChatInputCommandInteraction): Promise<void> {
+    // A schedule's thread belongs to its Runs; a Task must not take it over.
+    if (interaction.channel?.isThread() && this.scheduleByThread(interaction.channel.id)) {
+      await interaction.reply({
+        content: "เธรดนี้เป็นของ schedule — สั่งรอบใหม่ด้วย `/schedule run` หรือเปิด `/task` ในห้องหลักแทน",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
     const prompt = interaction.options.getString("prompt", true);
     const workspace = this.resolveWorkspace(interaction.options.getString("path"));
     if ("error" in workspace) {
@@ -317,6 +377,393 @@ export class Bot {
       content: [`**งานทั้งหมด ${this.sessions.size} งาน**`, ...lines].join("\n"),
       flags: MessageFlags.Ephemeral,
     });
+  }
+
+  // ---------------------------------------------------------------- schedules
+
+  private scheduleByThread(threadId: string): ScheduleRecord | undefined {
+    return this.scheduleStore.all().find((record) => record.threadId === threadId);
+  }
+
+  /** Owner and Operator manage a schedule; pause alone is open to every Member. */
+  private canManageSchedule(record: ScheduleRecord, userId: string): boolean {
+    return userId === record.ownerId || userId === this.config.operatorUserId;
+  }
+
+  private async onSchedule(interaction: ChatInputCommandInteraction): Promise<void> {
+    switch (interaction.options.getSubcommand()) {
+      case "create":
+        await this.onScheduleCreate(interaction);
+        return;
+      case "list":
+        await this.onScheduleList(interaction);
+        return;
+      case "pause":
+        await this.onSchedulePause(interaction);
+        return;
+      case "resume":
+        await this.onScheduleResume(interaction);
+        return;
+      case "delete":
+        await this.onScheduleDelete(interaction);
+        return;
+      case "run":
+        await this.onScheduleRun(interaction);
+        return;
+      default:
+        await interaction.reply({ content: "ไม่รู้จักคำสั่งย่อยนี้", flags: MessageFlags.Ephemeral });
+    }
+  }
+
+  private async onScheduleCreate(interaction: ChatInputCommandInteraction): Promise<void> {
+    const prompt = interaction.options.getString("prompt", true);
+    const parsed = parseRecurrence({
+      every: interaction.options.getString("every") ?? undefined,
+      at: interaction.options.getString("at") ?? undefined,
+      days: interaction.options.getString("days") ?? undefined,
+    });
+    if (!parsed.ok) {
+      await interaction.reply({ content: parsed.error, flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const workspace = this.resolveWorkspace(interaction.options.getString("path"));
+    if ("error" in workspace) {
+      await interaction.reply({ content: workspace.error, flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const channel = interaction.channel;
+    if (channel?.type !== ChannelType.GuildText && channel?.type !== ChannelType.GuildAnnouncement) {
+      await interaction.reply({
+        content: "ตั้ง schedule ได้ในห้องข้อความหลักของเซิร์ฟเวอร์เท่านั้น (ไม่ใช่ในเธรด)",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const browserGrant = interaction.options.getBoolean("browser") ?? false;
+    const model = interaction.options.getString("model") ?? this.config.defaultModel;
+    const now = new Date();
+    const record: ScheduleRecord = {
+      id: this.scheduleStore.newId(),
+      ownerId: interaction.user.id,
+      channelId: channel.id,
+      threadId: "",
+      prompt,
+      workspace: workspace.path,
+      model,
+      recurrence: parsed.recurrence,
+      browserGrant,
+      paused: false,
+      consecutiveFailures: 0,
+      createdAt: now.toISOString(),
+      nextRunAt: nextFireAt(parsed.recurrence, now, now).toISOString(),
+    };
+
+    await interaction.reply(`⏰ ตั้งเวลา: ${truncate(prompt, 150)}`);
+    const anchor = await interaction.fetchReply();
+    const thread = await anchor.startThread({
+      name: truncate(`⏰ ${prompt.replace(/\s+/g, " ")}`, 90),
+      autoArchiveDuration: ThreadAutoArchiveDuration.OneWeek,
+    });
+    record.threadId = thread.id;
+    await this.scheduleStore.put(record);
+
+    await thread.send(
+      [
+        `⏰ **Schedule ใหม่** โดย <@${record.ownerId}> · id \`${record.id}\``,
+        `🔁 ${describeRecurrence(record.recurrence)} · รอบแรก ${formatLocal(record.nextRunAt)}`,
+        `📂 \`${record.workspace}\``,
+        `🧠 \`${record.model}\``,
+        browserGrant
+          ? "🌐 ได้สิทธิ์ browser — รอบอัตโนมัติใช้บัญชีที่ล็อกอินค้างได้โดยไม่ถามใคร (ADR 0004)"
+          : "🚫 ไม่ได้สิทธิ์ browser",
+        "",
+        `ทุกรอบรันในเธรดนี้ · หยุดฉุกเฉินได้ทุกคนด้วย \`/schedule pause id:${record.id}\``,
+      ].join("\n"),
+    );
+  }
+
+  private async onScheduleList(interaction: ChatInputCommandInteraction): Promise<void> {
+    const records = this.scheduleStore.all();
+    if (records.length === 0) {
+      await interaction.reply({ content: "ยังไม่มี schedule", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const lines = records.map((record) => {
+      const state = record.paused ? "⏸️" : this.scheduler.isRunning(record.id) ? "🟢" : "⚪";
+      const browser = record.browserGrant ? " · 🌐" : "";
+      const next = record.paused ? "หยุดอยู่" : `ถัดไป ${formatLocal(record.nextRunAt)}`;
+      return `${state} \`${record.id}\` ${describeRecurrence(record.recurrence)} · ${next} · <#${record.threadId}> · <@${record.ownerId}>${browser}`;
+    });
+    await interaction.reply({
+      content: [`**Schedule ทั้งหมด ${records.length} รายการ**`, ...lines].join("\n"),
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  /**
+   * Resolves a schedule id and, for `manage` actions, checks the caller's
+   * rights — replying with the reason and returning undefined on either miss.
+   * `pause` deliberately skips the ownership check: the emergency brake is
+   * everyone's (ADR 0004).
+   */
+  private async requireSchedule(
+    interaction: ChatInputCommandInteraction | ButtonInteraction,
+    id: string,
+    action: "manage" | "pause",
+  ): Promise<ScheduleRecord | undefined> {
+    const record = this.scheduleStore.get(id.trim());
+    if (!record) {
+      await interaction.reply({
+        content: "ไม่พบ schedule ตาม id นี้ — ดู `/schedule list`",
+        flags: MessageFlags.Ephemeral,
+      });
+      return undefined;
+    }
+    if (action === "manage" && !this.canManageSchedule(record, interaction.user.id)) {
+      await interaction.reply({
+        content: "จัดการ schedule นี้ได้เฉพาะเจ้าของกับ operator (ยกเว้น pause ที่กดได้ทุกคน)",
+        flags: MessageFlags.Ephemeral,
+      });
+      return undefined;
+    }
+    return record;
+  }
+
+  /** Shared by `/schedule run` and the rerun button. */
+  private async fireAndReply(
+    interaction: ChatInputCommandInteraction | ButtonInteraction,
+    record: ScheduleRecord,
+  ): Promise<void> {
+    const result = await this.scheduler.fireNow(record.id);
+    if (!result.started) {
+      await interaction.reply({
+        content: `รันไม่ได้: ${result.reason ?? "ไม่ทราบสาเหตุ"}`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+    await interaction.reply(
+      `▶️ <@${interaction.user.id}> สั่งรัน \`${record.id}\` 1 รอบ — ตามผลได้ใน <#${record.threadId}>`,
+    );
+  }
+
+  private async onSchedulePause(interaction: ChatInputCommandInteraction): Promise<void> {
+    const record = await this.requireSchedule(
+      interaction,
+      interaction.options.getString("id", true),
+      "pause",
+    );
+    if (!record) return;
+    record.paused = true;
+    await this.scheduleStore.put(record);
+    await interaction.reply(
+      `⏸️ <@${interaction.user.id}> หยุด schedule \`${record.id}\` แล้ว — ปลุกกลับด้วย \`/schedule resume id:${record.id}\``,
+    );
+  }
+
+  private async onScheduleResume(interaction: ChatInputCommandInteraction): Promise<void> {
+    const record = await this.requireSchedule(
+      interaction,
+      interaction.options.getString("id", true),
+      "manage",
+    );
+    if (!record) return;
+    record.paused = false;
+    record.consecutiveFailures = 0;
+    const now = new Date();
+    record.nextRunAt = nextFireAt(record.recurrence, now, new Date(record.createdAt)).toISOString();
+    await this.scheduleStore.put(record);
+    await interaction.reply(
+      `▶️ schedule \`${record.id}\` กลับมาทำงานแล้ว — รอบถัดไป ${formatLocal(record.nextRunAt)}`,
+    );
+  }
+
+  private async onScheduleDelete(interaction: ChatInputCommandInteraction): Promise<void> {
+    const record = await this.requireSchedule(
+      interaction,
+      interaction.options.getString("id", true),
+      "manage",
+    );
+    if (!record) return;
+    await this.scheduleStore.delete(record.id);
+    await interaction.reply(
+      `🗑️ ลบ schedule \`${record.id}\` แล้ว (เธรด <#${record.threadId}> และประวัติยังอยู่)`,
+    );
+  }
+
+  private async onScheduleRun(interaction: ChatInputCommandInteraction): Promise<void> {
+    const record = await this.requireSchedule(
+      interaction,
+      interaction.options.getString("id", true),
+      "manage",
+    );
+    if (!record) return;
+    await this.fireAndReply(interaction, record);
+  }
+
+  private async onRerunButton(interaction: ButtonInteraction): Promise<void> {
+    if (!this.isAllowed(interaction.user.id)) {
+      await interaction.reply({
+        content: "บอทนี้จำกัดเฉพาะทีมภายใน",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+    const id = interaction.customId.slice(RERUN_BUTTON_PREFIX.length);
+    const record = await this.requireSchedule(interaction, id, "manage");
+    if (!record) return;
+    await this.fireAndReply(interaction, record);
+  }
+
+  /** The schedule's permanent thread, recreated in its channel if it was deleted. */
+  private async fetchScheduleThread(record: ScheduleRecord): Promise<ThreadChannel> {
+    const existing = await this.client.channels.fetch(record.threadId).catch(() => null);
+    if (existing?.isThread()) return existing;
+
+    const parent = await this.client.channels.fetch(record.channelId).catch(() => null);
+    if (
+      !parent ||
+      (parent.type !== ChannelType.GuildText && parent.type !== ChannelType.GuildAnnouncement)
+    ) {
+      throw new Error(`schedule ${record.id}: both its thread and its channel are gone`);
+    }
+    const anchor = await (parent as TextChannel).send(
+      `⏰ ${truncate(record.prompt, 150)} (สร้างเธรดใหม่แทนอันเดิมที่ถูกลบ)`,
+    );
+    const thread = await anchor.startThread({
+      name: truncate(`⏰ ${record.prompt.replace(/\s+/g, " ")}`, 90),
+      autoArchiveDuration: ThreadAutoArchiveDuration.OneWeek,
+    });
+    record.threadId = thread.id;
+    await this.scheduleStore.put(record);
+    return thread;
+  }
+
+  private rerunButtonRow(scheduleId: string): ActionRowBuilder<ButtonBuilder> {
+    return new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${RERUN_BUTTON_PREFIX}${scheduleId}`)
+        .setLabel("▶️ รันรอบนี้ใหม่")
+        .setStyle(ButtonStyle.Secondary),
+    );
+  }
+
+  private async postScheduleSkip(record: ScheduleRecord, reason: string): Promise<void> {
+    try {
+      const thread = await this.fetchScheduleThread(record);
+      await thread.send({
+        content: `⏭️ ${reason}`,
+        components: [this.rerunButtonRow(record.id)],
+      });
+    } catch (error) {
+      console.error(`[bot] could not post skip for schedule ${record.id}:`, error);
+    }
+  }
+
+  private async postScheduleAutoPause(record: ScheduleRecord): Promise<void> {
+    try {
+      const thread = await this.fetchScheduleThread(record);
+      await thread.send(
+        [
+          `⏸️ <@${record.ownerId}> schedule \`${record.id}\` **หยุดตัวเองแล้ว** — ล้มเหลว ${MAX_CONSECUTIVE_FAILURES} รอบติด`,
+          `เช็คสาเหตุจากรอบล่าสุดข้างบน แก้แล้วสั่ง \`/schedule resume id:${record.id}\``,
+        ].join("\n"),
+      );
+    } catch (error) {
+      console.error(`[bot] could not post auto-pause for schedule ${record.id}:`, error);
+    }
+  }
+
+  /**
+   * One Run: a fresh Agent Session that carries nothing over from earlier
+   * rounds (ADR 0004 — cross-run memory belongs to the prompt and workspace
+   * files). No approval path exists here: the grant decides, or it's a deny.
+   */
+  private async runScheduledOnce(record: ScheduleRecord): Promise<RunOutcome> {
+    const requester = `schedule:${record.id}`;
+    let thread: ThreadChannel;
+    try {
+      thread = await this.fetchScheduleThread(record);
+    } catch (error) {
+      console.error(`[bot] schedule ${record.id} has nowhere to run:`, error);
+      return "failure";
+    }
+
+    const reporter = new ThreadReporter(thread);
+    await reporter.say(`▶️ **เริ่มรอบใหม่** · ${formatLocal(new Date().toISOString())}`);
+
+    let ok = false;
+    const session = new AgentSession(
+      {
+        workspace: record.workspace,
+        model: record.model,
+        oauthToken: this.config.oauthToken,
+        ...(record.browserGrant
+          ? {
+              browserServer: {
+                type: "stdio",
+                command: process.execPath,
+                args: playwrightMcpArgs({
+                  profileDir: this.config.browserProfileDir,
+                  outputDir: record.workspace,
+                }),
+              },
+            }
+          : {}),
+      },
+      {
+        onText: (text) => reporter.say(text),
+        onActivity: (line) => reporter.addActivity(line),
+        onHeadline: (headline) => reporter.setHeadline(headline),
+        onSessionId: () => undefined,
+        decide: (toolName, input) => {
+          if (isBrowserTool(toolName)) {
+            const decision = decideScheduledBrowser(toolName, {
+              granted: record.browserGrant,
+              heldBy: this.browserHolder,
+              requester,
+            });
+            // First allowed browser call takes the whole-bot lock (ADR 0003).
+            if (decision.action === "allow") this.browserHolder = requester;
+            return decision;
+          }
+          return decideScheduled(toolName, input, record.workspace);
+        },
+        onApprovalNeeded: async () => ({
+          behavior: "deny",
+          message:
+            "scheduled run ไม่มีคนอนุมัติ — การกระทำนี้อยู่นอก grant ของ schedule ทำต่อด้วยวิธีอื่นหรือรายงานแทน",
+        }),
+        onSendFile: (buffer, filename, caption) => reporter.attach(buffer, filename, caption),
+        onTurnEnd: async (summary) => {
+          ok = summary.ok;
+          await reporter.clearStatus();
+          await reporter.say(formatSummary(summary));
+        },
+        onFatal: async (error) => {
+          ok = false;
+          const detail = error instanceof Error ? error.message : String(error);
+          console.error(`[bot] scheduled run ${record.id} died:`, error);
+          await reporter.clearStatus();
+          await reporter.say(`❌ รอบนี้ล้มเหลว: ${truncate(detail, 1500)}`);
+        },
+      },
+    );
+    this.scheduleRuns.set(record.id, session);
+
+    try {
+      await session.send(record.prompt);
+    } catch (error) {
+      ok = false;
+      console.error(`[bot] scheduled run ${record.id} failed:`, error);
+      await reporter.clearStatus();
+    } finally {
+      this.scheduleRuns.delete(record.id);
+      this.releaseBrowser(requester);
+      await session.close();
+    }
+    return ok ? "success" : "failure";
   }
 
   /** Routes a follow-up message in a task thread into that thread's session. */
@@ -467,6 +914,15 @@ export class Bot {
   private releaseBrowser(threadId: string): void {
     if (this.browserHolder === threadId) this.browserHolder = undefined;
   }
+}
+
+/** The browser holder is a task's thread id or `schedule:<id>` — render readably. */
+function describeHolder(holder: string): string {
+  return /^\d+$/.test(holder) ? `<#${holder}>` : `\`${holder}\``;
+}
+
+function formatLocal(iso: string): string {
+  return new Date(iso).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" });
 }
 
 function formatSummary(summary: TurnSummary): string {

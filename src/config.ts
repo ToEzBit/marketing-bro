@@ -23,6 +23,8 @@ export type Config = {
   /** Idle time after which a session's subprocess is reaped (context is resumable). */
   sessionIdleTimeoutMs: number;
   sessionStatePath: string;
+  /** Where Schedules are persisted, so they survive restarts. */
+  scheduleStatePath: string;
   /** Chrome profile the agent's browser uses. Holds real logins — never commit. */
   browserProfileDir: string;
 };
@@ -87,6 +89,9 @@ export function loadConfig(): Config {
     sessionIdleTimeoutMs: positiveInt("SESSION_IDLE_TIMEOUT_MS", 1_800_000),
     sessionStatePath: expandPath(
       process.env.SESSION_STATE_PATH ?? "./.state/sessions.json",
+    ),
+    scheduleStatePath: expandPath(
+      process.env.SCHEDULE_STATE_PATH ?? "./.state/schedules.json",
     ),
     browserProfileDir: expandPath(
       process.env.BROWSER_PROFILE_DIR ?? "./.state/browser-profile",

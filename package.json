@@ -12,7 +12,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "doctor": "tsx src/doctor.ts",
-    "test": "tsx src/policy.test.ts",
+    "test": "tsx src/policy.test.ts && tsx src/recurrence.test.ts && tsx src/scheduler.test.ts",
     "whoami": "tsx src/whoami.ts",
     "browser:login": "tsx src/browser-login.ts",
     "test:agent": "tsx src/attachment.test.ts",
