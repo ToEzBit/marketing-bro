@@ -303,20 +303,15 @@ export function isBrowserTool(toolName: string): boolean {
 /**
  * ADR 0003: the browser is a single shared resource whose profile carries the
  * operator's logins. The first browser call in a task asks a human once; the
- * approval then covers the rest of the task (`approved`). The hold (`heldBy`)
- * is separate and shorter-lived: it lasts only while a turn is actually using
- * the browser, so a task that closed its window does not block others. A task
- * that wants the browser while another holds it is denied, not queued. Tools
- * that reach past the browser onto the host (file upload, arbitrary code) ask
- * every time.
+ * approval then covers the rest of the task (`approved`). Contention is not
+ * decided here: a task whose call is allowed still stands in the Browser
+ * queue (ADR 0006) until the current holder lets go. Tools that reach past
+ * the browser onto the host (file upload, arbitrary code) ask every time.
  */
 export function decideBrowser(
   toolName: string,
-  browser: { heldBy: string | undefined; requester: string; approved: boolean },
+  browser: { approved: boolean },
 ): Decision {
-  if (browser.heldBy !== undefined && browser.heldBy !== browser.requester) {
-    return { action: "deny", reason: `browser is in use by task ${browser.heldBy}` };
-  }
   if (BROWSER_ALWAYS_ASK.has(toolName)) {
     return {
       action: "ask",
@@ -392,21 +387,19 @@ export function decideScheduled(
  * ADR 0004: browser access in a scheduled Run comes from the creation-time
  * grant, not an approval prompt. Upload is part of the grant (posting needs
  * it); `browser_run_code_unsafe` stays shut because it is host-level code
- * execution, which no grant covers. The single-browser lock of ADR 0003 still
- * applies unchanged.
+ * execution, which no grant covers. Contention is not decided here — an
+ * allowed call stands in the Browser queue (ADR 0006), waiting at most until
+ * the schedule's own next round.
  */
 export function decideScheduledBrowser(
   toolName: string,
-  context: { granted: boolean; heldBy: string | undefined; requester: string },
+  context: { granted: boolean },
 ): Decision {
   if (!context.granted) {
     return {
       action: "deny",
       reason: "schedule นี้ไม่ได้รับสิทธิ์ browser ตอนสร้าง — ทำงานต่อโดยไม่ใช้ browser หรือรายงานแทน",
     };
-  }
-  if (context.heldBy !== undefined && context.heldBy !== context.requester) {
-    return { action: "deny", reason: `browser is in use by task ${context.heldBy}` };
   }
   if (toolName === BROWSER_UNSAFE_CODE_TOOL) {
     return {

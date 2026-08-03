@@ -11,6 +11,7 @@ Discord bot ที่สั่งงาน Claude Agent SDK บนเครื�
   - [0003](./docs/adr/0003-browser-via-playwright-mcp.md) — Browser ผ่าน Playwright MCP (headed + persistent profile)
   - [0004](./docs/adr/0004-scheduled-runs-use-grants.md) — Scheduled Run ใช้ Grant ตอนสร้างแทน Approval ตอนรัน
   - [0005](./docs/adr/0005-skills-central-folder-via-plugin.md) — Skill โหลดจากโฟลเดอร์กลางระดับบอท ผ่าน plugin ของ SDK
+  - [0006](./docs/adr/0006-browser-queue.md) — Browser เข้าคิวรอ (FIFO) แทนการปฏิเสธเมื่อไม่ว่าง
 
 ## คำสั่ง
 

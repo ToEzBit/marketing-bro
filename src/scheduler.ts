@@ -10,8 +10,6 @@ import type { ScheduleRecord, ScheduleStore } from "./schedule-store.js";
 export type RunOutcome = "success" | "failure";
 
 export type SchedulerHooks = {
-  /** Pre-flight gate, e.g. "the browser this schedule needs is held by a task". */
-  canStart(record: ScheduleRecord): { ok: true } | { ok: false; reason: string };
   /** Executes one Run to completion. Never rejects in normal operation. */
   run(record: ScheduleRecord): Promise<RunOutcome>;
   /** A due slot was not run; the reason is posted to the schedule's thread. */
@@ -74,11 +72,6 @@ export class Scheduler {
         void this.hooks.onSkip(record, "ข้ามรอบนี้เพราะรอบก่อนยังทำไม่เสร็จ");
         continue;
       }
-      const gate = this.hooks.canStart(record);
-      if (!gate.ok) {
-        void this.hooks.onSkip(record, gate.reason);
-        continue;
-      }
       void this.execute(record).catch(this.logError);
     }
   }
@@ -91,8 +84,6 @@ export class Scheduler {
     if (this.running.has(id)) {
       return { started: false, reason: "รอบก่อนยังทำไม่เสร็จ" };
     }
-    const gate = this.hooks.canStart(record);
-    if (!gate.ok) return { started: false, reason: gate.reason };
     void this.execute(record).catch(this.logError);
     return { started: true };
   }

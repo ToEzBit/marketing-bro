@@ -57,8 +57,6 @@ type Harness = {
   autoPauses: ScheduleRecord[];
   setNow: (date: Date) => void;
   setOutcome: (outcome: RunOutcome | "hang") => void;
-  gate: { ok: true } | { ok: false; reason: string };
-  setGate: (gate: { ok: true } | { ok: false; reason: string }) => void;
 };
 
 const T0 = new Date(2026, 6, 31, 10, 0, 0, 0);
@@ -102,15 +100,10 @@ async function harness(overrides: Partial<ScheduleRecord> = {}): Promise<Harness
     setOutcome: (value) => {
       outcome = value;
     },
-    gate: { ok: true },
-    setGate: (gate) => {
-      state.gate = gate;
-    },
     scheduler: undefined as unknown as Scheduler,
   };
 
   const hooks: SchedulerHooks = {
-    canStart: () => state.gate,
     run: (target) => {
       state.runs.push({ ...target });
       if (outcome === "hang") return new Promise<RunOutcome>(() => undefined);
@@ -179,17 +172,6 @@ await check("while the previous run is still going, the next slot is skipped", a
   assert.equal(stored.nextRunAt, new Date(T0.getTime() + 90 * MIN).toISOString());
 });
 
-await check("when canStart says no (e.g. browser held), the slot is skipped with that reason", async () => {
-  const h = await harness();
-  h.setGate({ ok: false, reason: "Browser ถูกใช้อยู่โดย task-x" });
-  h.setNow(new Date(T0.getTime() + 30 * MIN));
-  await h.scheduler.tick();
-  await settle();
-  assert.equal(h.runs.length, 0);
-  assert.equal(h.skips.length, 1);
-  assert.match(h.skips[0]!.reason, /Browser/);
-});
-
 await check("start() reports rounds missed while the bot was down, without running them", async () => {
   const h = await harness();
   // Bot wakes up 65 minutes late: the 10:30 and 11:00 slots are gone.
@@ -240,7 +222,6 @@ await check("a run that throws counts as a failure", async () => {
   const throwing = new Scheduler(
     h.store,
     {
-      canStart: () => ({ ok: true }),
       run: () => Promise.reject(new Error("boom")),
       onSkip: () => undefined,
       onAutoPause: () => undefined,
@@ -253,10 +234,16 @@ await check("a run that throws counts as a failure", async () => {
 
 await check("skips do not count toward auto-pause", async () => {
   const h = await harness({ consecutiveFailures: MAX_CONSECUTIVE_FAILURES - 1 });
-  h.setGate({ ok: false, reason: "busy" });
+  h.setOutcome("hang");
   h.setNow(new Date(T0.getTime() + 30 * MIN));
   await h.scheduler.tick();
+  await until(() => h.runs.length === 1);
+
+  // The next slot is skipped because the previous round is still going.
+  h.setNow(new Date(T0.getTime() + 60 * MIN));
+  await h.scheduler.tick();
   await settle();
+  assert.equal(h.skips.length, 1);
   const stored = h.store.get(h.record.id)!;
   assert.equal(stored.consecutiveFailures, MAX_CONSECUTIVE_FAILURES - 1);
   assert.equal(stored.paused, false);
@@ -290,7 +277,6 @@ await check("deleting a schedule mid-run does not resurrect it", async () => {
   const scheduler = new Scheduler(
     h.store,
     {
-      canStart: () => ({ ok: true }),
       run: () => pending,
       onSkip: () => undefined,
       onAutoPause: () => undefined,

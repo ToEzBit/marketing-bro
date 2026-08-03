@@ -217,39 +217,24 @@ check("unknown MCP tool asks", () =>
 );
 check("empty Bash command asks", () => assert.equal(bash(""), "ask"));
 
-console.log("browser (ADR 0003): one approval per task, uploads always ask, no queueing");
+console.log("browser (ADR 0003/0006): one approval per task, uploads always ask; contention is the queue's job");
 const NAVIGATE = "mcp__browser__browser_navigate";
-const free = { heldBy: undefined, requester: "task-a", approved: false };
-const approvedIdle = { heldBy: undefined, requester: "task-a", approved: true };
-const heldBySelf = { heldBy: "task-a", requester: "task-a", approved: true };
-const heldByOther = { heldBy: "task-b", requester: "task-a", approved: false };
-const approvedButHeldByOther = { heldBy: "task-b", requester: "task-a", approved: true };
+const firstUse = { approved: false };
+const approved = { approved: true };
 check("first browser call in a task asks", () =>
-  assert.equal(decideBrowser(NAVIGATE, free).action, "ask"),
+  assert.equal(decideBrowser(NAVIGATE, firstUse).action, "ask"),
 );
-check("browser call flows once the task holds the browser", () =>
-  assert.equal(decideBrowser(NAVIGATE, heldBySelf).action, "allow"),
+check("browser call flows once the task is approved", () =>
+  assert.equal(decideBrowser(NAVIGATE, approved).action, "allow"),
 );
-check("approved task reopens the browser in a later turn without asking again", () =>
-  assert.equal(decideBrowser(NAVIGATE, approvedIdle).action, "allow"),
-);
-check("browser call is denied while another task holds the browser", () =>
-  assert.equal(decideBrowser(NAVIGATE, heldByOther).action, "deny"),
-);
-check("a task's old approval does not beat another task's live hold", () =>
-  assert.equal(decideBrowser(NAVIGATE, approvedButHeldByOther).action, "deny"),
-);
-check("file upload asks even for the task holding the browser", () =>
-  assert.equal(decideBrowser(BROWSER_UPLOAD_TOOL, heldBySelf).action, "ask"),
+check("file upload asks even for an approved task", () =>
+  assert.equal(decideBrowser(BROWSER_UPLOAD_TOOL, approved).action, "ask"),
 );
 check("file upload asks on first browser use too", () =>
-  assert.equal(decideBrowser(BROWSER_UPLOAD_TOOL, free).action, "ask"),
+  assert.equal(decideBrowser(BROWSER_UPLOAD_TOOL, firstUse).action, "ask"),
 );
-check("file upload is denied while another task holds the browser", () =>
-  assert.equal(decideBrowser(BROWSER_UPLOAD_TOOL, heldByOther).action, "deny"),
-);
-check("run_code_unsafe asks even for the task holding the browser (host-level code)", () =>
-  assert.equal(decideBrowser(BROWSER_UNSAFE_CODE_TOOL, heldBySelf).action, "ask"),
+check("run_code_unsafe asks even for an approved task (host-level code)", () =>
+  assert.equal(decideBrowser(BROWSER_UNSAFE_CODE_TOOL, approved).action, "ask"),
 );
 check("browser tools are recognised by prefix", () => {
   assert.equal(isBrowserTool(NAVIGATE), true);
@@ -312,30 +297,24 @@ check("no scheduled decision is ever 'ask'", () => {
 });
 
 console.log("\nscheduled browser: the grant decides, host-escape stays shut");
-const grantedFree = { granted: true, heldBy: undefined, requester: "schedule:s1" };
-const grantedHeldBySelf = { granted: true, heldBy: "schedule:s1", requester: "schedule:s1" };
-const grantedHeldByOther = { granted: true, heldBy: "task-b", requester: "schedule:s1" };
-const notGranted = { granted: false, heldBy: undefined, requester: "schedule:s1" };
+const granted = { granted: true };
+const notGranted = { granted: false };
 
 check("without the grant every browser tool is denied", () => {
   assert.equal(decideScheduledBrowser(NAVIGATE, notGranted).action, "deny");
   assert.equal(decideScheduledBrowser(BROWSER_UPLOAD_TOOL, notGranted).action, "deny");
 });
-check("with the grant, browser use is allowed with no approval", () => {
-  assert.equal(decideScheduledBrowser(NAVIGATE, grantedFree).action, "allow");
-  assert.equal(decideScheduledBrowser(NAVIGATE, grantedHeldBySelf).action, "allow");
-});
-check("file upload is allowed under the grant (posting needs it)", () => {
-  assert.equal(decideScheduledBrowser(BROWSER_UPLOAD_TOOL, grantedFree).action, "allow");
-});
-check("run_code_unsafe is denied even with the grant (host-level code)", () => {
-  assert.equal(decideScheduledBrowser(BROWSER_UNSAFE_CODE_TOOL, grantedHeldBySelf).action, "deny");
-});
-check("denied while another task holds the browser", () => {
-  assert.equal(decideScheduledBrowser(NAVIGATE, grantedHeldByOther).action, "deny");
-});
+check("with the grant, browser use is allowed with no approval", () =>
+  assert.equal(decideScheduledBrowser(NAVIGATE, granted).action, "allow"),
+);
+check("file upload is allowed under the grant (posting needs it)", () =>
+  assert.equal(decideScheduledBrowser(BROWSER_UPLOAD_TOOL, granted).action, "allow"),
+);
+check("run_code_unsafe is denied even with the grant (host-level code)", () =>
+  assert.equal(decideScheduledBrowser(BROWSER_UNSAFE_CODE_TOOL, granted).action, "deny"),
+);
 check("no scheduled browser decision is ever 'ask'", () => {
-  for (const context of [grantedFree, grantedHeldBySelf, grantedHeldByOther, notGranted]) {
+  for (const context of [granted, notGranted]) {
     for (const tool of [NAVIGATE, BROWSER_UPLOAD_TOOL, BROWSER_UNSAFE_CODE_TOOL]) {
       assert.notEqual(decideScheduledBrowser(tool, context).action, "ask");
     }

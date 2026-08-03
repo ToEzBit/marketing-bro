@@ -24,6 +24,7 @@ import {
 } from "./agent-session.js";
 import { SEND_FILE_TOOL } from "./attachment-tool.js";
 import { playwrightMcpArgs } from "./browser.js";
+import { BrowserQueue, type AcquireOutcome } from "./browser-queue.js";
 import { expandPath, type Config } from "./config.js";
 import {
   decide,
@@ -49,6 +50,17 @@ type LiveSession = {
 
 const IDLE_SWEEP_INTERVAL_MS = 5 * 60_000;
 
+/**
+ * A scheduled Run stops waiting for the browser this long before its next
+ * round is due, leaving the losing round time to end its turn before the new
+ * round fires (ADR 0006) — a wait ending exactly on the slot would make the
+ * scheduler skip the new round as still-running.
+ */
+const SCHEDULE_DEADLINE_GRACE_MS = 90_000;
+
+/** One message for every way a waiter leaves the Browser queue unserved. */
+const BROWSER_WAIT_CANCELLED = "งานถูกยกเลิกระหว่างรอคิว browser";
+
 /** Button under a skipped/failed round; pressing it reruns that schedule once. */
 const RERUN_BUTTON_PREFIX = "schedule-rerun:";
 
@@ -67,14 +79,13 @@ export class Bot {
   private readonly scheduleRuns = new Map<string, AgentSession>();
   private idleSweeper: NodeJS.Timeout | undefined;
   /**
-   * Thread id of the task holding the browser (ADR 0003). The profile allows
-   * one Chrome instance, so this is a whole-bot lock. Held only while a turn
-   * is actually using the browser: taken on the first allowed browser call of
-   * a turn, released when that turn ends (the agent is told to close the
-   * window before then) — not when the session eventually dies, which used to
-   * keep the lock for ~30 minutes of idle after the window was already gone.
+   * The whole-bot Browser queue (ADR 0006). The profile allows one Chrome
+   * instance, so one requester holds it at a time — taken on the first
+   * allowed browser call of a turn, released when that turn ends — and
+   * everyone else waits FIFO inside their pending tool call instead of being
+   * denied.
    */
-  private browserHolder: string | undefined;
+  private readonly browserQueue = new BrowserQueue();
   /**
    * Tasks whose one-per-task browser approval (ADR 0003) already happened.
    * Outlives the hold above, so a follow-up turn reopens the browser without
@@ -87,15 +98,6 @@ export class Bot {
     this.store = new TaskStore(config.sessionStatePath);
     this.scheduleStore = new ScheduleStore(config.scheduleStatePath);
     this.scheduler = new Scheduler(this.scheduleStore, {
-      canStart: (record) => {
-        if (record.browserGrant && this.browserHolder !== undefined) {
-          return {
-            ok: false,
-            reason: `ข้ามรอบนี้เพราะ Browser ถูกใช้อยู่โดย ${describeHolder(this.browserHolder)}`,
-          };
-        }
-        return { ok: true };
-      },
       run: (record) => this.runScheduledOnce(record),
       onSkip: (record, reason) => this.postScheduleSkip(record, reason),
       onAutoPause: (record) => this.postScheduleAutoPause(record),
@@ -791,6 +793,9 @@ export class Bot {
     await reporter.say(`▶️ **เริ่มรอบใหม่** · ${formatLocal(new Date().toISOString())}`);
 
     let ok = false;
+    // Set when the round gave up waiting for the browser at its deadline —
+    // the agent still ends its turn gracefully, but the round is a failure.
+    let browserDeadlineHit = false;
     const session = new AgentSession(
       {
         workspace: record.workspace,
@@ -815,18 +820,36 @@ export class Bot {
         onActivity: (line) => reporter.addActivity(line),
         onHeadline: (headline) => reporter.setHeadline(headline),
         onSessionId: () => undefined,
-        decide: (toolName, input) => {
-          if (isBrowserTool(toolName)) {
-            const decision = decideScheduledBrowser(toolName, {
-              granted: record.browserGrant,
-              heldBy: this.browserHolder,
-              requester,
-            });
-            // First allowed browser call takes the whole-bot lock (ADR 0003).
-            if (decision.action === "allow") this.browserHolder = requester;
-            return decision;
+        decide: async (toolName, input, { signal }) => {
+          if (!isBrowserTool(toolName)) return decideScheduled(toolName, input, record.workspace);
+          const decision = decideScheduledBrowser(toolName, { granted: record.browserGrant });
+          if (decision.action !== "allow") return decision;
+          // Stand in the Browser queue, at most until this schedule's own
+          // next round (ADR 0006). The deadline backs off a little before the
+          // slot so the losing round finishes its wrap-up turn before the new
+          // round's tick — on the slot itself the new round would be skipped
+          // as "รอบก่อนยังทำไม่เสร็จ". It also keeps a wrap-up retry bounded:
+          // the recomputed deadline is already past, denying it again. A next
+          // slot already in the past (manual fire of a paused schedule) means
+          // no competing round is coming, so no deadline then.
+          const nextAt = new Date(record.nextRunAt).getTime();
+          const outcome = await this.waitForBrowser({
+            requester,
+            reporter,
+            signal,
+            ...(nextAt > Date.now() ? { deadlineAt: nextAt - SCHEDULE_DEADLINE_GRACE_MS } : {}),
+          });
+          if (outcome === "acquired") return decision;
+          if (outcome === "deadline") {
+            browserDeadlineHit = true;
+            return {
+              action: "deny",
+              reason:
+                "รอคิว browser ไม่ทันเวลารอบถัดไปของ schedule นี้ — จบรอบนี้โดยรายงานสั้น ๆ " +
+                "ว่ารอ browser ไม่ทัน อย่าตั้งเวลาลองใหม่เอง รอบหน้าจะเริ่มใหม่ตามตารางอยู่แล้ว",
+            };
           }
-          return decideScheduled(toolName, input, record.workspace);
+          return { action: "deny", reason: BROWSER_WAIT_CANCELLED };
         },
         onApprovalNeeded: async () => ({
           behavior: "deny",
@@ -861,7 +884,7 @@ export class Bot {
       this.releaseBrowser(requester);
       await session.close();
     }
-    return ok ? "success" : "failure";
+    return ok && !browserDeadlineHit ? "success" : "failure";
   }
 
   /** Routes a follow-up message in a task thread into that thread's session. */
@@ -937,17 +960,22 @@ export class Bot {
       onSessionId: async (sessionId) => {
         if (persist) await this.store.setSessionId(record.threadId, sessionId);
       },
-      decide: (toolName, input) => {
+      decide: async (toolName, input, { signal }) => {
         if (!isBrowserTool(toolName)) return decide(toolName, input, this.config.extraBashAllow);
         const decision = decideBrowser(toolName, {
-          heldBy: this.browserHolder,
-          requester: record.threadId,
           approved: this.browserApproved.has(record.threadId),
         });
-        // An approved task re-takes the whole-bot lock as soon as it touches
-        // the browser again; the lock frees at the end of the turn.
-        if (decision.action === "allow") this.browserHolder = record.threadId;
-        return decision;
+        if (decision.action !== "allow") return decision;
+        // An approved task stands in the Browser queue inside this pending
+        // tool call — no deadline; the humans in the thread are the timeout.
+        const outcome = await this.waitForBrowser({
+          requester: record.threadId,
+          reporter,
+          signal,
+        });
+        return outcome === "acquired"
+          ? decision
+          : { action: "deny", reason: BROWSER_WAIT_CANCELLED };
       },
       onApprovalNeeded: async (request) => {
         reporter.addActivity(`ขออนุมัติ ${request.toolName} ${describeTool(request.toolName, request.input)}`);
@@ -965,13 +993,17 @@ export class Bot {
           signal: request.signal,
         });
         if (isBrowserTool(request.toolName) && result.behavior === "allow") {
-          // Another task can win the browser while this prompt sits open;
-          // re-check before taking it so two tasks never hold one profile.
-          if (this.browserHolder !== undefined && this.browserHolder !== record.threadId) {
-            return { behavior: "deny", message: `browser is in use by task ${this.browserHolder}` };
+          // The human said yes; the browser may still be busy, so the freshly
+          // approved call stands in the Browser queue like any other.
+          const outcome = await this.waitForBrowser({
+            requester: record.threadId,
+            reporter,
+            signal: request.signal,
+          });
+          if (outcome !== "acquired") {
+            return { behavior: "deny", message: BROWSER_WAIT_CANCELLED };
           }
           this.browserApproved.add(record.threadId);
-          this.browserHolder = record.threadId;
         }
         return result;
       },
@@ -1024,9 +1056,36 @@ export class Bot {
     await live.session.close();
   }
 
-  /** Closing the session kills its Playwright subprocess, so Chrome is gone too. */
-  private releaseBrowser(threadId: string): void {
-    if (this.browserHolder === threadId) this.browserHolder = undefined;
+  /**
+   * Stands in the Browser queue inside a pending tool call (ADR 0006). The
+   * thread sees who holds the browser and this waiter's place in line; the
+   * abort signal (tool call cancelled, session closed) resolves "cancelled".
+   */
+  private async waitForBrowser(options: {
+    requester: string;
+    reporter: ThreadReporter;
+    signal: AbortSignal;
+    deadlineAt?: number;
+  }): Promise<AcquireOutcome> {
+    let waited = false;
+    const outcome = await this.browserQueue.acquire(options.requester, {
+      signal: options.signal,
+      ...(options.deadlineAt !== undefined ? { deadlineAt: options.deadlineAt } : {}),
+      onWait: (position, holder) => {
+        waited = true;
+        options.reporter.setHeadline(
+          `รอ browser ว่าง — ถือโดย ${describeHolder(holder)} (คิวที่ ${position})`,
+        );
+      },
+    });
+    if (outcome === "acquired" && waited) options.reporter.setHeadline("ได้คิว browser แล้ว");
+    return outcome;
+  }
+
+  /** Lets go of the browser (and any place in line); the next in line proceeds. */
+  private releaseBrowser(requester: string): void {
+    this.browserQueue.cancelWaiting(requester);
+    this.browserQueue.release(requester);
   }
 }
 

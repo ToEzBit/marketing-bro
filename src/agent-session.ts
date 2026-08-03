@@ -32,7 +32,9 @@ You have browser tools (mcp__${BROWSER_MCP_NAME}__*) that drive a real, visible 
 
 When you are done with the browser for the current request, call mcp__${BROWSER_MCP_NAME}__browser_close to close the window — a lingering Chrome window is clutter on the operator's screen. Closing loses nothing: logins live in the profile on disk, and if a follow-up needs the browser again you can just reopen it (no new approval is needed within the same task). Only leave it open when you genuinely expect to continue on the same page within this turn.
 
-If the browser fails to launch with a ProcessSingleton or "profile already in use" error, the profile is open elsewhere — tell the user to close the window left open by \`npm run browser:login\`, or to wait for the other task using the browser, then try again. Do not work around it by launching a browser yourself through Bash.`;
+The browser is shared by the whole bot, one task at a time. When another task is using it, your browser call simply takes longer to start — it is waiting in a queue and proceeds automatically the moment the browser frees up. Never schedule your own retries or wakeups for a busy browser; waiting inside the call IS the retry.
+
+If the browser fails to launch with a ProcessSingleton or "profile already in use" error, the profile is open outside the bot — tell the user to close the window left open by \`npm run browser:login\`, then try again. Do not work around it by launching a browser yourself through Bash.`;
 
 /** Content block shapes we render. Narrower than the SDK's full union. */
 type ContentBlock =
@@ -80,15 +82,24 @@ export type SessionHooks = {
   onApprovalNeeded: (request: ToolApprovalRequest) => Promise<PermissionResult>;
   /** Puts a file into the conversation as a real Discord attachment. */
   onSendFile: SendFile;
-  /** Auto-approve, refuse outright, or escalate to a human. */
+  /**
+   * Auto-approve, refuse outright, or escalate to a human. May resolve slowly —
+   * a browser call stands in the Browser queue in here (ADR 0006) — so the
+   * abort signal of the underlying tool call is passed along for early exit.
+   */
   decide: (
     toolName: string,
     input: Record<string, unknown>,
+    context: { signal: AbortSignal },
   ) =>
-    | { action: "allow"; reason: string }
-    | { action: "ask"; reason: string }
-    | { action: "deny"; reason: string };
+    | Decision
+    | Promise<Decision>;
 };
+
+type Decision =
+  | { action: "allow"; reason: string }
+  | { action: "ask"; reason: string }
+  | { action: "deny"; reason: string };
 
 export type SessionConfig = {
   workspace: string;
@@ -294,7 +305,7 @@ export class AgentSession {
   }
 
   private readonly canUseTool: CanUseTool = async (toolName, input, options) => {
-    const verdict = this.hooks.decide(toolName, input);
+    const verdict = await this.hooks.decide(toolName, input, { signal: options.signal });
     if (verdict.action === "allow") {
       this.hooks.onActivity(`auto-approved ${toolName}`);
       return { behavior: "allow" };
