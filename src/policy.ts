@@ -303,13 +303,16 @@ export function isBrowserTool(toolName: string): boolean {
 /**
  * ADR 0003: the browser is a single shared resource whose profile carries the
  * operator's logins. The first browser call in a task asks a human once; the
- * task then holds the browser and later calls flow. A task that wants it while
- * another holds it is denied, not queued. Tools that reach past the browser
- * onto the host (file upload, arbitrary code) ask every time.
+ * approval then covers the rest of the task (`approved`). The hold (`heldBy`)
+ * is separate and shorter-lived: it lasts only while a turn is actually using
+ * the browser, so a task that closed its window does not block others. A task
+ * that wants the browser while another holds it is denied, not queued. Tools
+ * that reach past the browser onto the host (file upload, arbitrary code) ask
+ * every time.
  */
 export function decideBrowser(
   toolName: string,
-  browser: { heldBy: string | undefined; requester: string },
+  browser: { heldBy: string | undefined; requester: string; approved: boolean },
 ): Decision {
   if (browser.heldBy !== undefined && browser.heldBy !== browser.requester) {
     return { action: "deny", reason: `browser is in use by task ${browser.heldBy}` };
@@ -323,7 +326,7 @@ export function decideBrowser(
           : "runs arbitrary code on this host, outside the browser",
     };
   }
-  if (browser.heldBy === browser.requester) {
+  if (browser.approved) {
     return { action: "allow", reason: "browser already approved for this task" };
   }
   return { action: "ask", reason: "first browser use in this task" };

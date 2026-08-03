@@ -68,9 +68,20 @@ export class Bot {
   private idleSweeper: NodeJS.Timeout | undefined;
   /**
    * Thread id of the task holding the browser (ADR 0003). The profile allows
-   * one Chrome instance, so this is a whole-bot lock, released with the session.
+   * one Chrome instance, so this is a whole-bot lock. Held only while a turn
+   * is actually using the browser: taken on the first allowed browser call of
+   * a turn, released when that turn ends (the agent is told to close the
+   * window before then) — not when the session eventually dies, which used to
+   * keep the lock for ~30 minutes of idle after the window was already gone.
    */
   private browserHolder: string | undefined;
+  /**
+   * Tasks whose one-per-task browser approval (ADR 0003) already happened.
+   * Outlives the hold above, so a follow-up turn reopens the browser without
+   * asking again. Forgotten when the task's session closes or dies, which
+   * matches the old behaviour where the approval lived on the session.
+   */
+  private readonly browserApproved = new Set<string>();
 
   constructor(private readonly config: Config) {
     this.store = new TaskStore(config.sessionStatePath);
@@ -926,10 +937,18 @@ export class Bot {
       onSessionId: async (sessionId) => {
         if (persist) await this.store.setSessionId(record.threadId, sessionId);
       },
-      decide: (toolName, input) =>
-        isBrowserTool(toolName)
-          ? decideBrowser(toolName, { heldBy: this.browserHolder, requester: record.threadId })
-          : decide(toolName, input, this.config.extraBashAllow),
+      decide: (toolName, input) => {
+        if (!isBrowserTool(toolName)) return decide(toolName, input, this.config.extraBashAllow);
+        const decision = decideBrowser(toolName, {
+          heldBy: this.browserHolder,
+          requester: record.threadId,
+          approved: this.browserApproved.has(record.threadId),
+        });
+        // An approved task re-takes the whole-bot lock as soon as it touches
+        // the browser again; the lock frees at the end of the turn.
+        if (decision.action === "allow") this.browserHolder = record.threadId;
+        return decision;
+      },
       onApprovalNeeded: async (request) => {
         reporter.addActivity(`ขออนุมัติ ${request.toolName} ${describeTool(request.toolName, request.input)}`);
         const result = await requestApproval({
@@ -951,6 +970,7 @@ export class Bot {
           if (this.browserHolder !== undefined && this.browserHolder !== record.threadId) {
             return { behavior: "deny", message: `browser is in use by task ${this.browserHolder}` };
           }
+          this.browserApproved.add(record.threadId);
           this.browserHolder = record.threadId;
         }
         return result;
@@ -959,6 +979,9 @@ export class Bot {
         await reporter.attach(buffer, filename, caption);
       },
       onTurnEnd: async (summary) => {
+        // The agent closes its browser window before the turn ends, so the
+        // whole-bot lock frees here; the task's approval stays for follow-ups.
+        this.releaseBrowser(record.threadId);
         await reporter.clearStatus();
         await reporter.say(formatSummary(summary));
       },
@@ -967,6 +990,7 @@ export class Bot {
         console.error(`[bot] session died (resuming=${wasResuming}):`, error);
         this.sessions.delete(record.threadId);
         this.releaseBrowser(record.threadId);
+        this.browserApproved.delete(record.threadId);
         await reporter.clearStatus();
 
         if (wasResuming && persist) {
@@ -995,6 +1019,7 @@ export class Bot {
     if (!live) return;
     this.sessions.delete(threadId);
     this.releaseBrowser(threadId);
+    this.browserApproved.delete(threadId);
     await live.reporter.clearStatus();
     await live.session.close();
   }

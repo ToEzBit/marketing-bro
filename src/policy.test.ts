@@ -219,17 +219,25 @@ check("empty Bash command asks", () => assert.equal(bash(""), "ask"));
 
 console.log("browser (ADR 0003): one approval per task, uploads always ask, no queueing");
 const NAVIGATE = "mcp__browser__browser_navigate";
-const free = { heldBy: undefined, requester: "task-a" };
-const heldBySelf = { heldBy: "task-a", requester: "task-a" };
-const heldByOther = { heldBy: "task-b", requester: "task-a" };
+const free = { heldBy: undefined, requester: "task-a", approved: false };
+const approvedIdle = { heldBy: undefined, requester: "task-a", approved: true };
+const heldBySelf = { heldBy: "task-a", requester: "task-a", approved: true };
+const heldByOther = { heldBy: "task-b", requester: "task-a", approved: false };
+const approvedButHeldByOther = { heldBy: "task-b", requester: "task-a", approved: true };
 check("first browser call in a task asks", () =>
   assert.equal(decideBrowser(NAVIGATE, free).action, "ask"),
 );
 check("browser call flows once the task holds the browser", () =>
   assert.equal(decideBrowser(NAVIGATE, heldBySelf).action, "allow"),
 );
+check("approved task reopens the browser in a later turn without asking again", () =>
+  assert.equal(decideBrowser(NAVIGATE, approvedIdle).action, "allow"),
+);
 check("browser call is denied while another task holds the browser", () =>
   assert.equal(decideBrowser(NAVIGATE, heldByOther).action, "deny"),
+);
+check("a task's old approval does not beat another task's live hold", () =>
+  assert.equal(decideBrowser(NAVIGATE, approvedButHeldByOther).action, "deny"),
 );
 check("file upload asks even for the task holding the browser", () =>
   assert.equal(decideBrowser(BROWSER_UPLOAD_TOOL, heldBySelf).action, "ask"),
