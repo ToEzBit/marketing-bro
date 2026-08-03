@@ -205,6 +205,12 @@ check("BashOutput is auto-approved (reads an existing shell)", () =>
 check("Task is auto-approved (its subagent's calls are gated individually)", () =>
   assert.equal(decide("Task", { description: "review" }, []).action, "allow"),
 );
+check("Skill is auto-approved (its actions are gated individually, ADR 0005)", () =>
+  assert.equal(decide("Skill", { command: "make-image" }, []).action, "allow"),
+);
+check("Skill is allowed in scheduled runs too", () =>
+  assert.equal(decideScheduled("Skill", { command: "make-image" }, "/ws").action, "allow"),
+);
 check("KillShell asks", () => assert.equal(decide("KillShell", {}, []).action, "ask"));
 check("unknown MCP tool asks", () =>
   assert.equal(decide("mcp__deploy__ship", {}, []).action, "ask"),

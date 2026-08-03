@@ -10,6 +10,7 @@ import {
   GatewayIntentBits,
   MessageFlags,
   ThreadAutoArchiveDuration,
+  type AutocompleteInteraction,
   type ButtonInteraction,
   type ChatInputCommandInteraction,
   type Message,
@@ -36,6 +37,7 @@ import { requestApproval } from "./discord/approval.js";
 import { ThreadReporter, describeTool, truncate, type Postable } from "./discord/render.js";
 import { describeRecurrence, nextFireAt, parseRecurrence } from "./recurrence.js";
 import { ScheduleStore, type ScheduleRecord } from "./schedule-store.js";
+import { ensureSkillsPlugin, listSkills, withSkill } from "./skills.js";
 import { MAX_CONSECUTIVE_FAILURES, Scheduler, type RunOutcome } from "./scheduler.js";
 import { TaskStore, type TaskRecord } from "./store.js";
 
@@ -112,6 +114,12 @@ export class Bot {
     });
 
     this.client.on(Events.InteractionCreate, (interaction) => {
+      if (interaction.isAutocomplete()) {
+        void this.onSkillAutocomplete(interaction).catch((error: unknown) => {
+          console.error("[bot] skill autocomplete failed:", error);
+        });
+        return;
+      }
       if (interaction.isButton() && interaction.customId.startsWith(RERUN_BUTTON_PREFIX)) {
         void this.onRerunButton(interaction).catch((error: unknown) => {
           console.error("[bot] rerun button failed:", error);
@@ -219,6 +227,72 @@ export class Bot {
     }
   }
 
+  /**
+   * Answers each keystroke in a `skill` option with the live folder contents
+   * (ADR 0005) — this is what makes a freshly dropped skill visible in
+   * Discord with nothing to re-register.
+   */
+  private async onSkillAutocomplete(interaction: AutocompleteInteraction): Promise<void> {
+    const focused = interaction.options.getFocused(true);
+    if (focused.name !== "skill" || !this.isAllowed(interaction.user.id)) {
+      await interaction.respond([]);
+      return;
+    }
+    const query = focused.value.toLowerCase();
+    const choices = listSkills(this.config.skillsDir)
+      .filter(
+        (skill) =>
+          skill.name.toLowerCase().includes(query) ||
+          skill.description.toLowerCase().includes(query),
+      )
+      .slice(0, 25)
+      .map((skill) => ({
+        name: truncate(
+          skill.description ? `${skill.name} — ${skill.description}` : skill.name,
+          100,
+        ),
+        value: skill.name.slice(0, 100),
+      }));
+    await interaction.respond(choices);
+  }
+
+  /**
+   * Reads and validates the `skill` option against the live folder. A miss
+   * gets an ephemeral reply and `ok: false` — the folder may have changed
+   * between typing and submitting.
+   */
+  private async resolveSkill(
+    interaction: ChatInputCommandInteraction,
+  ): Promise<{ ok: true; skill: string | null } | { ok: false }> {
+    const skill = interaction.options.getString("skill");
+    if (!skill) return { ok: true, skill: null };
+    if (listSkills(this.config.skillsDir).some((entry) => entry.name === skill)) {
+      return { ok: true, skill };
+    }
+    await interaction.reply({
+      content: `ไม่พบสกิล \`${skill}\` ในโฟลเดอร์ skill แล้ว — เลือกใหม่จากช่อง skill หรือเช็คโฟลเดอร์บนเครื่อง host`,
+      flags: MessageFlags.Ephemeral,
+    });
+    return { ok: false };
+  }
+
+  /**
+   * (Re)builds the plugin scaffold from the skills folder, once per new
+   * session — how a just-dropped skill reaches the next Task/Run without a
+   * restart (ADR 0005). Returns the session-config fragment to spread in.
+   * Skills must never take the bot down, so any scaffold failure just means
+   * a session without skills.
+   */
+  private refreshSkillsPlugin(): { skillsPluginPath?: string } {
+    try {
+      const path = ensureSkillsPlugin(this.config.skillsDir, this.config.skillsPluginDir);
+      return path ? { skillsPluginPath: path } : {};
+    } catch (error) {
+      console.error("[bot] skills plugin scaffold failed:", error);
+      return {};
+    }
+  }
+
   /** Resolves and validates the workspace for a new task. */
   private resolveWorkspace(input: string | null): { path: string } | { error: string } {
     if (!input) return { path: this.config.defaultWorkspace };
@@ -244,6 +318,8 @@ export class Bot {
       return;
     }
     const model = interaction.options.getString("model") ?? this.config.defaultModel;
+    const picked = await this.resolveSkill(interaction);
+    if (!picked.ok) return;
 
     const thread = await this.openThread(interaction, prompt);
     if (!thread) return;
@@ -266,13 +342,14 @@ export class Bot {
         `📋 **งานใหม่** โดย <@${interaction.user.id}>`,
         `📂 \`${workspace.path}\``,
         `🧠 \`${model}\``,
+        ...(picked.skill ? [`🧩 สกิล \`${picked.skill}\``] : []),
         "",
         "พิมพ์ในเธรดนี้เพื่อคุยต่อหรือสั่งเพิ่ม · `/stop` เพื่อสั่งหยุด",
       ].join("\n"),
     );
 
     const live = this.createSession(thread, record);
-    await live.session.send(prompt).catch(async (error: unknown) => {
+    await live.session.send(withSkill(prompt, picked.skill)).catch(async (error: unknown) => {
       await this.reportSessionFailure(live, error);
     });
   }
@@ -315,6 +392,8 @@ export class Bot {
       });
       return;
     }
+    const picked = await this.resolveSkill(interaction);
+    if (!picked.ok) return;
 
     await interaction.reply(`❓ <@${interaction.user.id}>: ${truncate(prompt, 1800)}`);
 
@@ -334,13 +413,14 @@ export class Bot {
         // /ask is advertised as a question, so it gets a read-only toolset —
         // it can look things up but never change the host.
         allowedTools: ASK_TOOLS,
+        ...this.refreshSkillsPlugin(),
       },
       this.buildHooks({ reporter, channel: channel as Postable, record, persist: false }),
     );
     this.transientSessions.add(session);
 
     try {
-      await session.send(prompt);
+      await session.send(withSkill(prompt, picked.skill));
     } finally {
       this.transientSessions.delete(session);
       await reporter.clearStatus();
@@ -443,13 +523,17 @@ export class Bot {
 
     const browserGrant = interaction.options.getBoolean("browser") ?? false;
     const model = interaction.options.getString("model") ?? this.config.defaultModel;
+    const picked = await this.resolveSkill(interaction);
+    if (!picked.ok) return;
     const now = new Date();
     const record: ScheduleRecord = {
       id: this.scheduleStore.newId(),
       ownerId: interaction.user.id,
       channelId: channel.id,
       threadId: "",
-      prompt,
+      // The skill instruction is baked into the stored prompt, so every later
+      // Run carries it with no schema change and no extra lookup.
+      prompt: withSkill(prompt, picked.skill),
       workspace: workspace.path,
       model,
       recurrence: parsed.recurrence,
@@ -475,6 +559,7 @@ export class Bot {
         `🔁 ${describeRecurrence(record.recurrence)} · รอบแรก ${formatLocal(record.nextRunAt)}`,
         `📂 \`${record.workspace}\``,
         `🧠 \`${record.model}\``,
+        ...(picked.skill ? [`🧩 สกิล \`${picked.skill}\``] : []),
         browserGrant
           ? "🌐 ได้สิทธิ์ browser — รอบอัตโนมัติใช้บัญชีที่ล็อกอินค้างได้โดยไม่ถามใคร (ADR 0004)"
           : "🚫 ไม่ได้สิทธิ์ browser",
@@ -700,6 +785,7 @@ export class Bot {
         workspace: record.workspace,
         model: record.model,
         oauthToken: this.config.oauthToken,
+        ...this.refreshSkillsPlugin(),
         ...(record.browserGrant
           ? {
               browserServer: {
@@ -803,6 +889,7 @@ export class Bot {
         workspace: record.workspace,
         model: record.model,
         oauthToken: this.config.oauthToken,
+        ...this.refreshSkillsPlugin(),
         ...(record.sessionId ? { resumeSessionId: record.sessionId } : {}),
         // Headed Chrome on a shared persistent profile (ADR 0003). Screenshots
         // and downloads land in .browser-output/ inside the workspace — MCP's

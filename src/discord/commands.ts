@@ -2,6 +2,7 @@ import {
   REST,
   Routes,
   SlashCommandBuilder,
+  type SlashCommandStringOption,
   type RESTPostAPIApplicationCommandsJSONBody,
 } from "discord.js";
 
@@ -10,6 +11,19 @@ export const MODEL_CHOICES = [
   { name: "Opus (ฉลาดสุด ใช้โควต้าเยอะ)", value: "opus" },
   { name: "Haiku (เบาสุด)", value: "haiku" },
 ] as const;
+
+/**
+ * The Skill picker (ADR 0005). Autocomplete, not fixed choices: the bot
+ * answers each keystroke by reading the skills folder live, so a freshly
+ * dropped skill shows up without re-registering anything with Discord.
+ */
+function skillOption(option: SlashCommandStringOption): SlashCommandStringOption {
+  return option
+    .setName("skill")
+    .setDescription("สกิลที่ให้ใช้ทำงานนี้ (พิมพ์เพื่อค้นหา — ไม่ระบุ = agent เลือกเองตามงาน)")
+    .setRequired(false)
+    .setAutocomplete(true);
+}
 
 export function buildCommands(): RESTPostAPIApplicationCommandsJSONBody[] {
   const task = new SlashCommandBuilder()
@@ -34,7 +48,8 @@ export function buildCommands(): RESTPostAPIApplicationCommandsJSONBody[] {
         .setDescription("โมเดลที่ใช้")
         .setRequired(false)
         .addChoices(...MODEL_CHOICES),
-    );
+    )
+    .addStringOption(skillOption);
 
   const ask = new SlashCommandBuilder()
     .setName("ask")
@@ -45,7 +60,8 @@ export function buildCommands(): RESTPostAPIApplicationCommandsJSONBody[] {
         .setDescription("คำถาม")
         .setRequired(true)
         .setMaxLength(1800),
-    );
+    )
+    .addStringOption(skillOption);
 
   const schedule = new SlashCommandBuilder()
     .setName("schedule")
@@ -88,7 +104,8 @@ export function buildCommands(): RESTPostAPIApplicationCommandsJSONBody[] {
           option
             .setName("browser")
             .setDescription("มอบสิทธิ์ใช้ browser (บัญชีที่ล็อกอินค้าง) ให้งานนี้ตอนรันอัตโนมัติ"),
-        ),
+        )
+        .addStringOption(skillOption),
     )
     .addSubcommand((sub) =>
       sub.setName("list").setDescription("ดู schedule ทั้งหมด"),

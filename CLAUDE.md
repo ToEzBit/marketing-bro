@@ -10,6 +10,7 @@ Discord bot ที่สั่งงาน Claude Agent SDK บนเครื�
   - [0002](./docs/adr/0002-permission-model.md) — permission model (allowlist / Approval)
   - [0003](./docs/adr/0003-browser-via-playwright-mcp.md) — Browser ผ่าน Playwright MCP (headed + persistent profile)
   - [0004](./docs/adr/0004-scheduled-runs-use-grants.md) — Scheduled Run ใช้ Grant ตอนสร้างแทน Approval ตอนรัน
+  - [0005](./docs/adr/0005-skills-central-folder-via-plugin.md) — Skill โหลดจากโฟลเดอร์กลางระดับบอท ผ่าน plugin ของ SDK
 
 ## คำสั่ง
 
@@ -29,3 +30,4 @@ npm run test:browser   # เช็คว่า login ที่ทำผ่าน
 - config มาจาก `.env` (ห้าม commit) ผ่าน `src/config.ts` — เพิ่ม env ใหม่ให้ validate ด้วย zod ที่นั่น
 - ทุกการเปิด browser ต้องผ่าน `src/browser.ts` ที่เดียว (ทั้งของ Agent และของ Operator ตอนล็อกอิน) — เปิด Chrome เองตรง ๆ จะได้ profile ที่ล็อกอินแล้วแต่บอทมองไม่เห็น ดูเหตุผลใน ADR 0003
 - แก้พฤติกรรมที่กระทบสิทธิ์ผู้ใช้ (ใครสั่งอะไรได้ ต้อง Approval ไหม) = ต้องสอดคล้องกับ ADR 0002 หรือไม่ก็เขียน ADR ใหม่
+- โฟลเดอร์ `skills/` คือ instruction ที่ฉีดเข้า Agent ทุก session โดยไม่มีใครรีวิวซ้ำ (ADR 0005) — Operator เท่านั้นที่วางไฟล์ได้ อย่าเพิ่มช่องทางติดตั้ง skill ผ่าน Discord โดยไม่เขียน ADR ใหม่

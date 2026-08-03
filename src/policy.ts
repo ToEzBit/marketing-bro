@@ -25,6 +25,9 @@ const READ_ONLY_TOOLS = new Set([
   // Spawns a subagent. Harmless by itself — the subagent's own tool calls come
   // back through this policy individually (canUseTool reports their agentID).
   "Task",
+  // Loads a skill's instructions into context (ADR 0005). Same shape as Task:
+  // anything the skill then does arrives here as its own tool call.
+  "Skill",
 ]);
 
 /**

@@ -27,7 +27,14 @@ export type Config = {
   scheduleStatePath: string;
   /** Chrome profile the agent's browser uses. Holds real logins — never commit. */
   browserProfileDir: string;
+  /** Central Skill folder the Operator drops skill folders into (ADR 0005). */
+  skillsDir: string;
+  /** Generated plugin scaffold the SDK loads the skills through. */
+  skillsPluginDir: string;
 };
+
+/** Default Skill folder when SKILLS_DIR is unset — doctor reads it too. */
+export const DEFAULT_SKILLS_DIR = "./skills";
 
 function required(name: string): string {
   const value = process.env[name]?.trim();
@@ -96,5 +103,7 @@ export function loadConfig(): Config {
     browserProfileDir: expandPath(
       process.env.BROWSER_PROFILE_DIR ?? "./.state/browser-profile",
     ),
+    skillsDir: expandPath(process.env.SKILLS_DIR ?? DEFAULT_SKILLS_DIR),
+    skillsPluginDir: expandPath("./.state/skills-plugin"),
   };
 }

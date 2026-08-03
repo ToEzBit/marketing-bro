@@ -98,6 +98,11 @@ export type SessionConfig = {
   allowedTools?: string[];
   /** Playwright MCP server config. Omit and the session has no browser. */
   browserServer?: McpServerConfig;
+  /**
+   * Generated plugin scaffold that carries the bot's central Skill folder
+   * (ADR 0005). Omit and the session has no skills.
+   */
+  skillsPluginPath?: string;
 };
 
 /** Async queue that feeds user messages into a streaming-input query. */
@@ -263,6 +268,15 @@ export class AgentSession {
       },
       ...(this.config.resumeSessionId ? { resume: this.config.resumeSessionId } : {}),
       ...(this.config.allowedTools ? { allowedTools: this.config.allowedTools } : {}),
+      // Central Skill folder via a local plugin (ADR 0005). `skills: "all"`
+      // switches the Skill tool on even for sessions with a restricted
+      // allowedTools list, like /ask.
+      ...(this.config.skillsPluginPath
+        ? {
+            plugins: [{ type: "local" as const, path: this.config.skillsPluginPath }],
+            skills: "all" as const,
+          }
+        : {}),
       // ANTHROPIC_API_KEY takes precedence over the OAuth token, so it is
       // cleared here: this bot must bill against the Claude subscription only.
       env: {

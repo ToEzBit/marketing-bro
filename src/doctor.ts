@@ -8,7 +8,8 @@ import { createRequire } from "node:module";
 import { homedir, platform } from "node:os";
 import { config as loadEnv } from "dotenv";
 import { query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import { expandPath } from "./config.js";
+import { DEFAULT_SKILLS_DIR, expandPath } from "./config.js";
+import { listSkills } from "./skills.js";
 
 loadEnv();
 
@@ -80,6 +81,17 @@ async function main(): Promise<void> {
     existsSync(profileDir)
       ? profileDir
       : `${profileDir} (ยังไม่มี — รัน \`npm run browser:login\` เพื่อล็อกอินครั้งแรก)`,
+  );
+
+  console.log("\n— skills —");
+  const skillsDir = expandPath(process.env.SKILLS_DIR ?? DEFAULT_SKILLS_DIR);
+  const skills = listSkills(skillsDir);
+  report(
+    true,
+    "skills folder",
+    skills.length > 0
+      ? `${skillsDir} — ${skills.length} สกิล: ${skills.map((skill) => skill.name).join(", ")}`
+      : `${skillsDir} (ยังไม่มีสกิล — วางโฟลเดอร์ <ชื่อ>/SKILL.md เพื่อเพิ่ม, ADR 0005)`,
   );
 
   console.log("\n— agent —");
