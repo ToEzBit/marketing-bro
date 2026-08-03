@@ -9,6 +9,7 @@
  * directory and still see two disjoint sets of logins. Every launch goes
  * through this module so that cannot drift apart again.
  */
+import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { chromium, type BrowserContext } from "playwright-core";
@@ -26,11 +27,38 @@ export const PLAYWRIGHT_MCP_CLI = join(
   "cli.js",
 );
 
+/**
+ * Chrome records a killed browser as a crashed exit, and the next launch on
+ * this profile then restores every tab that was left open — so the agent's
+ * old tabs "follow it" into the next session. Rewriting the profile's
+ * Preferences before each launch marks the last exit as clean and pins
+ * startup to a fresh new-tab page, so every launch starts empty. Best-effort:
+ * a missing Preferences file just means a first run with nothing to restore.
+ */
+function forgetOpenTabs(profileDir: string): void {
+  const prefsPath = join(profileDir, "Default", "Preferences");
+  try {
+    const prefs = JSON.parse(readFileSync(prefsPath, "utf8")) as {
+      profile?: Record<string, unknown>;
+      session?: Record<string, unknown>;
+    };
+    prefs.profile = { ...prefs.profile, exit_type: "Normal", exited_cleanly: true };
+    // 5 = "open the New Tab page" (1 would mean "continue where you left off").
+    prefs.session = { ...prefs.session, restore_on_startup: 5 };
+    writeFileSync(prefsPath, JSON.stringify(prefs));
+  } catch {
+    return;
+  }
+}
+
 /** Command line for the Playwright MCP server the agent drives. */
 export function playwrightMcpArgs(options: {
   profileDir: string;
   outputDir: string;
 }): string[] {
+  // Building the command is the last stop before every agent-side launch
+  // (ADR 0003), so the profile cleanup rides along here.
+  forgetOpenTabs(options.profileDir);
   return [
     PLAYWRIGHT_MCP_CLI,
     "--browser", CHANNEL,
@@ -45,6 +73,7 @@ export function playwrightMcpArgs(options: {
  * the agent's browser can actually read.
  */
 export function openProfileForLogin(profileDir: string): Promise<BrowserContext> {
+  forgetOpenTabs(profileDir);
   return chromium.launchPersistentContext(profileDir, {
     channel: CHANNEL,
     headless: false,
