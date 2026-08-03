@@ -19,7 +19,7 @@ Discord bot ที่สั่งงาน Claude Agent SDK บนเครื�
 npm run dev        # รันบอทแบบ watch (tsx)
 npm run build      # compile ลง dist/
 npm run typecheck  # tsc --noEmit
-npm test           # unit tests (policy, recurrence, scheduler)
+npm test           # unit tests (policy, browser-queue, recurrence, scheduler, skills)
 npm run doctor     # เช็ค env/config ว่าพร้อมรัน
 npm run browser:login  # เปิด Chrome ด้วย profile ของบอท ให้ Operator ล็อกอินเว็บครั้งแรก
 npm run test:browser   # เช็คว่า login ที่ทำผ่าน browser:login บอทอ่านเห็นจริง (ต้องมี Chrome)
@@ -28,7 +28,7 @@ npm run test:browser   # เช็คว่า login ที่ทำผ่าน
 ## ข้อควรระวัง
 
 - `src/policy.ts` คือหัวใจความปลอดภัย (allowlist คำสั่งอ่านล้วน + เกณฑ์ Risky command) — แก้เมื่อไรต้องรัน `npm test` เสมอ และถ้าเพิ่มคำสั่งเข้า allowlist ต้องแน่ใจว่ามันเขียน/รันโค้ดไม่ได้จริง ๆ (ดูเคสที่เคยปิดรูใน git log)
-- config มาจาก `.env` (ห้าม commit) ผ่าน `src/config.ts` — เพิ่ม env ใหม่ให้ validate ด้วย zod ที่นั่น
+- config มาจาก `.env` (ห้าม commit) ผ่าน `src/config.ts` — เพิ่ม env ใหม่ให้ validate ผ่าน helper ที่มีอยู่ที่นั่น (`required`/`positiveInt`/`list`) และอย่าลืมเพิ่มลง `.env.example` กับตารางใน README ด้วย
 - ทุกการเปิด browser ต้องผ่าน `src/browser.ts` ที่เดียว (ทั้งของ Agent และของ Operator ตอนล็อกอิน) — เปิด Chrome เองตรง ๆ จะได้ profile ที่ล็อกอินแล้วแต่บอทมองไม่เห็น ดูเหตุผลใน ADR 0003
 - แก้พฤติกรรมที่กระทบสิทธิ์ผู้ใช้ (ใครสั่งอะไรได้ ต้อง Approval ไหม) = ต้องสอดคล้องกับ ADR 0002 หรือไม่ก็เขียน ADR ใหม่
 - โฟลเดอร์ `skills/` คือ instruction ที่ฉีดเข้า Agent ทุก session โดยไม่มีใครรีวิวซ้ำ (ADR 0005) — Operator เท่านั้นที่วางไฟล์ได้ อย่าเพิ่มช่องทางติดตั้ง skill ผ่าน Discord โดยไม่เขียน ADR ใหม่

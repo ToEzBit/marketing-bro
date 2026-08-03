@@ -68,9 +68,12 @@ original conversation holds the image context ChatGPT needs:
 - **Download button not found** — fallback: open the image full-size and use
   `mcp__browser__browser_take_screenshot` on the image element (lower quality
   than the real file — tell the user it is a screenshot).
-- **Browser held by another Task** — the bot denies the request and names the
-  holding Task. Tell the user to wait for that Task to finish and try again.
-  Never launch a browser yourself through Bash.
+- **Browser held by another Task** — your browser call is not stuck: it waits
+  in a FIFO queue and proceeds automatically once it reaches the front of the
+  line (each holder releases the browser when its turn ends; the thread status
+  shows who holds it and your queue position). Keep waiting inside the call —
+  never self-retry, never schedule wakeups, and never launch a browser
+  yourself through Bash.
 - Never log out and never change account settings — the profile and the
   account belong to the Operator.
 
