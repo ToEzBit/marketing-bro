@@ -23,8 +23,9 @@ specified). At the end, tell the user the final prompt you used.
    - Login page / "Log in" button visible → **stop immediately** and tell the
      user the Operator must run `npm run browser:login` and log in to
      chatgpt.com first. Never attempt to log in yourself.
-   - Already logged in → always start a **New chat** (so leftover chat
-     context cannot bleed into the image).
+   - Already logged in → for a **new** image, start a **New chat** (so
+     leftover chat context cannot bleed into the image). For a revision of an
+     image from this task, see "Revising an image" below instead.
 3. Type the request into the chat box and send it — lead with an explicit
    image instruction, e.g. `Create an image: <image description>`.
 4. Wait until generation truly finishes: use `mcp__browser__browser_wait_for`
@@ -38,6 +39,25 @@ specified). At the end, tell the user the final prompt you used.
    the file you just downloaded), with a short caption stating the prompt it
    was generated from. Describing the image in text does not count as sending
    it — the user cannot see the file until you call send_file.
+7. Close the browser window (`mcp__browser__browser_close`) once the image is
+   downloaded and sent — the ChatGPT conversation is saved in the account, so
+   nothing is lost, and revisions can reopen it later.
+
+## Revising an image
+
+When the user asks to change an image generated earlier in this task
+("make the hair blue", "same but at night"), do not start a new chat — the
+original conversation holds the image context ChatGPT needs:
+
+1. Reopen `https://chatgpt.com/` if the browser was closed (no new approval
+   is needed within the same task) and find the conversation — it is the one
+   this task created, usually at the top of the sidebar history.
+2. Send the change request as a follow-up message in that conversation, then
+   wait / download / send the file back exactly as in steps 4–7 above.
+3. If the conversation cannot be found, fall back to uploading the saved
+   image file from the workspace (`mcp__browser__browser_file_upload` into a
+   new chat) and asking for the edit there. Uploading a host file triggers an
+   Approval prompt every time — that is by design; wait for it.
 
 ## When things go wrong
 
