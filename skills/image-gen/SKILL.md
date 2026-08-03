@@ -1,49 +1,61 @@
 ---
 name: image-gen
-description: สร้างรูปภาพด้วย ChatGPT (chatgpt.com) ผ่าน browser ของบอท แล้วส่งไฟล์รูปกลับเข้า Discord ใช้สกิลนี้ทุกครั้งที่ผู้ใช้ขอสร้างรูป วาดรูป gen รูป ทำภาพประกอบ ทำ thumbnail หรือขอรูปภาพใหม่ (generate/draw/create image) แม้ไม่ได้พูดคำว่า ChatGPT — คำบรรยายรูป (image prompt) คือข้อความที่ผู้ใช้สั่งมา
+description: Generate an image with ChatGPT (chatgpt.com) through the bot's browser and send the image file back to Discord. Use this skill every time the user asks to create, draw, or generate an image, illustration, or thumbnail — in any language (Thai requests like "สร้างรูป", "วาดรูป", "gen รูป" count) and even when they never mention ChatGPT. The image prompt is whatever the user asked for.
 ---
 
-# image-gen — สร้างรูปด้วย ChatGPT ผ่าน browser
+# image-gen — generate images via ChatGPT in the browser
 
-สร้างรูปโดยใช้ browser จริงของบอท (Chrome ที่ล็อกอินบัญชี ChatGPT ของ Operator ค้างไว้)
-เข้า chatgpt.com → สั่งสร้างรูป → รอ → ดาวน์โหลด → ส่งไฟล์กลับเข้า thread
+Generate an image using the bot's real browser (Chrome, with the Operator's
+ChatGPT account already logged in): open chatgpt.com → request the image →
+wait → download → send the file back into the thread.
 
-**Input:** คำบรรยายรูปจากข้อความสั่งงานของผู้ใช้ ถ้าสั้นหรือกำกวม ขยายเป็น prompt
-ที่ละเอียดขึ้นได้โดยซื่อตรงต่อความตั้งใจเดิม (อย่าเปลี่ยน subject/สไตล์ที่ผู้ใช้ระบุ)
-และบอกผู้ใช้ตอนจบว่าใช้ prompt สุดท้ายว่าอะไร
+**Input:** the image description from the user's task message. If it is short
+or vague, you may expand it into a more detailed prompt as long as you stay
+faithful to the original intent (never change the subject or style the user
+specified). At the end, tell the user the final prompt you used.
 
-## ขั้นตอน
+## Steps
 
-1. `mcp__browser__browser_navigate` ไป `https://chatgpt.com/`
-   (การใช้ browser ครั้งแรกใน Task จะมี Approval เด้งถามใน Discord — เรื่องปกติ รอได้)
-2. `mcp__browser__browser_snapshot` เช็คสถานะ:
-   - เจอหน้า login / ปุ่ม "Log in" → **หยุดทันที** แจ้งผู้ใช้ว่า Operator ต้องรัน
-     `npm run browser:login` แล้วล็อกอิน chatgpt.com ก่อน อย่าพยายามล็อกอินเอง
-   - ล็อกอินอยู่แล้ว → เริ่ม **New chat** เสมอ (กันบริบทแชทเก่าปนเข้ามาในรูป)
-3. พิมพ์คำสั่งลงช่องแชทแล้วส่ง — ขึ้นต้นด้วยคำสั่งชัด ๆ ว่าต้องการรูป เช่น
-   `Create an image: <คำบรรยายรูป>`
-4. รอ generation ให้จบจริง: ใช้ `mcp__browser__browser_wait_for` หรือ snapshot ซ้ำ
-   ทุก ~15 วินาที การสร้างรูปใช้เวลาได้ถึง 1–2 นาที — รูปที่ยังเบลอ/มี progress
-   แปลว่ายังไม่เสร็จ อย่ารีบดาวน์โหลดหรือตัดสินว่าล้มเหลว
-5. ดาวน์โหลดรูป: hover/คลิกที่รูปแล้วกดปุ่ม download ของ ChatGPT
-   ไฟล์จะถูกบันทึกลง `.browser-output/` ใน workspace อัตโนมัติ
-6. ส่งรูปเข้า thread ด้วย `mcp__discord__send_file` (พาธไฟล์ที่เพิ่งดาวน์โหลด)
-   พร้อม caption สั้น ๆ ว่าสร้างจาก prompt อะไร — การบรรยายรูปด้วยข้อความเฉย ๆ
-   ไม่นับว่าส่งรูปแล้ว ผู้ใช้มองไม่เห็นไฟล์จนกว่าจะเรียก send_file
+1. `mcp__browser__browser_navigate` to `https://chatgpt.com/`
+   (the first browser use in a Task triggers an Approval prompt in Discord —
+   that is normal, just wait for it).
+2. `mcp__browser__browser_snapshot` and check the state:
+   - Login page / "Log in" button visible → **stop immediately** and tell the
+     user the Operator must run `npm run browser:login` and log in to
+     chatgpt.com first. Never attempt to log in yourself.
+   - Already logged in → always start a **New chat** (so leftover chat
+     context cannot bleed into the image).
+3. Type the request into the chat box and send it — lead with an explicit
+   image instruction, e.g. `Create an image: <image description>`.
+4. Wait until generation truly finishes: use `mcp__browser__browser_wait_for`
+   or re-snapshot every ~15 seconds. Generation can take 1–2 minutes — a
+   blurry image or a progress indicator means it is still running. Do not
+   download early and do not declare failure prematurely.
+5. Download the image: hover/click the image and use ChatGPT's download
+   button. The file is saved into `.browser-output/` inside the workspace
+   automatically.
+6. Send the image into the thread with `mcp__discord__send_file` (the path of
+   the file you just downloaded), with a short caption stating the prompt it
+   was generated from. Describing the image in text does not count as sending
+   it — the user cannot see the file until you call send_file.
 
-## เมื่อเจอปัญหา
+## When things go wrong
 
-- **ChatGPT ปฏิเสธสร้าง (นโยบายเนื้อหา)** — รายงานเหตุผลให้ผู้ใช้ตรง ๆ
-  อย่าดัดแปลง prompt เพื่อเลี่ยงนโยบาย
-- **rate limit / ให้รอ / ต้องอัปเกรดแพลน** — แจ้งข้อความที่เว็บแสดงให้ผู้ใช้ทราบ แล้วจบงาน
-- **หาปุ่ม download ไม่เจอ** — fallback: เปิดรูปแบบเต็ม แล้ว
-  `mcp__browser__browser_take_screenshot` เฉพาะ element ของรูป
-  (คุณภาพต่ำกว่าไฟล์จริง — บอกผู้ใช้ด้วยว่าเป็น screenshot)
-- **browser ถูก Task อื่นถืออยู่** — บอทจะปฏิเสธพร้อมบอกว่า Task ไหนถือ
-  แจ้งผู้ใช้ให้รอ Task นั้นจบแล้วสั่งใหม่ อย่าเปิด browser เองผ่าน Bash เด็ดขาด
-- ห้าม log out, ห้ามเปลี่ยนการตั้งค่าบัญชี — โปรไฟล์และบัญชีเป็นของ Operator
+- **ChatGPT refuses (content policy)** — report the reason to the user
+  honestly. Do not rewrite the prompt to evade the policy.
+- **Rate limit / "please wait" / plan upgrade required** — relay the message
+  the site shows to the user, then end the task.
+- **Download button not found** — fallback: open the image full-size and use
+  `mcp__browser__browser_take_screenshot` on the image element (lower quality
+  than the real file — tell the user it is a screenshot).
+- **Browser held by another Task** — the bot denies the request and names the
+  holding Task. Tell the user to wait for that Task to finish and try again.
+  Never launch a browser yourself through Bash.
+- Never log out and never change account settings — the profile and the
+  account belong to the Operator.
 
-## ใช้กับ Schedule
+## Use with Schedules
 
-สกิลนี้ต้องใช้ browser — Schedule ที่จะเรียกใช้ต้องได้รับ browser grant ตอนสร้าง
-(`/schedule create ... browser:true`) ไม่งั้นทุกรอบจะโดนปฏิเสธตอนแตะ browser
+This skill needs the browser — a Schedule that invokes it must be created
+with the browser grant (`/schedule create ... browser:true`), otherwise every
+Run will be denied the moment it touches the browser.
