@@ -1,4 +1,5 @@
 import { existsSync, statSync } from "node:fs";
+import { join } from "node:path";
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -706,7 +707,7 @@ export class Bot {
                 command: process.execPath,
                 args: playwrightMcpArgs({
                   profileDir: this.config.browserProfileDir,
-                  outputDir: record.workspace,
+                  outputDir: join(record.workspace, ".browser-output"),
                 }),
               },
             }
@@ -804,13 +805,14 @@ export class Bot {
         oauthToken: this.config.oauthToken,
         ...(record.sessionId ? { resumeSessionId: record.sessionId } : {}),
         // Headed Chrome on a shared persistent profile (ADR 0003). Screenshots
-        // and downloads land in the workspace, where send_file can reach them.
+        // and downloads land in .browser-output/ inside the workspace — MCP's
+        // auto artifacts (page-*.yml, console-*.log) stay out of the work files.
         browserServer: {
           type: "stdio",
           command: process.execPath,
           args: playwrightMcpArgs({
             profileDir: this.config.browserProfileDir,
-            outputDir: record.workspace,
+            outputDir: join(record.workspace, ".browser-output"),
           }),
         },
       },
