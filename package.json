@@ -15,6 +15,7 @@
     "test": "tsx src/policy.test.ts && tsx src/browser-queue.test.ts && tsx src/recurrence.test.ts && tsx src/scheduler.test.ts && tsx src/skills.test.ts",
     "whoami": "tsx src/whoami.ts",
     "browser:login": "tsx src/browser-login.ts",
+    "workspace:init": "tsx src/setup-workspace.ts",
     "test:agent": "tsx src/attachment.test.ts",
     "test:browser": "tsx src/browser-profile.test.ts"
   },

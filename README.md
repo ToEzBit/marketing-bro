@@ -89,7 +89,7 @@ npm run dev
 | `CLAUDE_CODE_OAUTH_TOKEN` | ✅ | ผลจาก `claude setup-token` |
 | `OPERATOR_USER_ID` | ✅ | Discord user ID ของคุณ อนุมัติได้ทุกงาน |
 | `ALLOWED_USER_IDS` | — | user ID ทีมภายใน คั่นด้วยจุลภาค คนนอกรายการถูกปฏิเสธ (operator ถูกเพิ่มให้เสมอ — เว้นว่าง = ใช้ได้คนเดียว) |
-| `DEFAULT_WORKSPACE` | — | โฟลเดอร์เริ่มต้นเมื่อ `/task` ไม่ระบุ `path` |
+| `DEFAULT_WORKSPACE` | — | โฟลเดอร์เริ่มต้นเมื่อ `/task`/`/schedule` ไม่ระบุ `path` และเป็นที่ที่ `workspace:init` สร้าง content pipeline (ADR 0007) — ต้องอยู่นอก repo |
 | `DEFAULT_MODEL` | — | `sonnet` (ค่าเริ่มต้น) / `opus` / `haiku` |
 | `EXTRA_BASH_ALLOW` | — | คำสั่ง shell ที่ให้ผ่านอัตโนมัติเพิ่ม เช่น `make test,poetry run pytest` |
 | `APPROVAL_TIMEOUT_MS` | — | หมดเวลารออนุมัติ (ค่าเริ่มต้น 10 นาที = ปฏิเสธอัตโนมัติ) |
@@ -206,6 +206,7 @@ npm run dev            # รันแบบ hot reload
 npm run doctor         # เช็ค auth + SDK ก่อนต่อ Discord
 npm run whoami         # เช็คว่าบอทอยู่เซิร์ฟเวอร์ไหน + สิทธิ์ต่อห้อง
 npm run browser:login  # เปิด Chrome ให้ Operator ล็อกอินเว็บที่จะให้บอทใช้
+npm run workspace:init # สร้าง workspace ของ content pipeline ที่ DEFAULT_WORKSPACE
 npm test               # เทสต์ policy, คิว browser, recurrence, scheduler, skills (เร็ว ไม่ใช้โควต้า)
 npm run test:agent     # เทสต์การแนบไฟล์ end-to-end (ใช้โควต้าเล็กน้อย)
 npm run test:browser   # เทสต์ว่า login ที่ทำไว้บอทอ่านเห็นจริง (ต้องมี Chrome)

@@ -34,7 +34,9 @@ specified). At the end, tell the user the final prompt you used.
    download early and do not declare failure prematurely.
 5. Download the image: hover/click the image and use ChatGPT's download
    button. The file is saved into `.browser-output/` inside the workspace
-   automatically.
+   automatically. Note the exact saved file path from the download result
+   and state it in your report — anything that copies the file later must
+   use that exact path, not "the newest file in the folder".
 6. Send the image into the thread with `mcp__discord__send_file` (the path of
    the file you just downloaded), with a short caption stating the prompt it
    was generated from. Describing the image in text does not count as sending

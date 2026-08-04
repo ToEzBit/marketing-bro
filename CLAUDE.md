@@ -12,6 +12,7 @@ Discord bot ที่สั่งงาน Claude Agent SDK บนเครื�
   - [0004](./docs/adr/0004-scheduled-runs-use-grants.md) — Scheduled Run ใช้ Grant ตอนสร้างแทน Approval ตอนรัน
   - [0005](./docs/adr/0005-skills-central-folder-via-plugin.md) — Skill โหลดจากโฟลเดอร์กลางระดับบอท ผ่าน plugin ของ SDK
   - [0006](./docs/adr/0006-browser-queue.md) — Browser เข้าคิวรอ (FIFO) แทนการปฏิเสธเมื่อไม่ว่าง
+  - [0007](./docs/adr/0007-content-pipeline-md-handoff.md) — Content pipeline ส่งงานข้าม Schedule ด้วยไฟล์ md + คนอนุมัติก่อนโพสต์
 
 ## คำสั่ง
 
@@ -22,6 +23,7 @@ npm run typecheck  # tsc --noEmit
 npm test           # unit tests (policy, browser-queue, recurrence, scheduler, skills)
 npm run doctor     # เช็ค env/config ว่าพร้อมรัน
 npm run browser:login  # เปิด Chrome ด้วย profile ของบอท ให้ Operator ล็อกอินเว็บครั้งแรก
+npm run workspace:init # สร้าง workspace ของ content pipeline ที่ DEFAULT_WORKSPACE (ADR 0007)
 npm run test:browser   # เช็คว่า login ที่ทำผ่าน browser:login บอทอ่านเห็นจริง (ต้องมี Chrome)
 ```
 
