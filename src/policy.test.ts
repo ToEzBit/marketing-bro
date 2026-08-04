@@ -321,5 +321,60 @@ check("no scheduled browser decision is ever 'ask'", () => {
   }
 });
 
+console.log("\nfor-loops over plain words pass when every body command passes");
+for (const command of [
+  'for f in trends/a.md trends/b.md; do cat "$f"; done',
+  'for f in trends/*.md; do echo "=== $f ==="; head -20 "$f"; echo; done',
+  'for f in drafts/*.md; do echo "=== $f ==="; cat "$f"; echo; done',
+  'for f in drafts/*.md; do echo "=== $f ==="; sed -n "1,12p" "$f"; echo; done',
+  // Nested loop: the inner `for` head rides inside a `do` segment.
+  'for d in trends drafts; do for f in a b; do echo "$f"; done; done',
+]) {
+  check(`อนุญาต: ${command}`, () => assert.equal(bash(command), "allow"));
+}
+
+console.log("\nloop shapes that could run or smuggle anything still ask");
+for (const command of [
+  // Body command not on the allowlist (or a write-capable sed form).
+  'for f in drafts/*.md; do sed -i "s/x/y/" "$f"; done',
+  'for f in a b; do curl "$f"; done',
+  // Loop word shaped like a flag could expand into `sort -o` in the body.
+  'for f in -o; do sort x "$f"; done',
+  // Loop word shaped like an assignment.
+  'for f in PATH=/tmp; do env; done',
+  // Command substitution in the list is uninspectable, as everywhere else.
+  "for f in $(ls); do cat $f; done",
+  // The loop variable cannot BE the command.
+  'for f in cat; do "$f" /etc/hosts; done',
+  // while/until conditions are commands and can loop forever.
+  "while true; do echo hi; done",
+  "until false; do echo hi; done",
+  // Malformed heads fail closed.
+  "for f in; do echo x; done",
+  "for; do echo x; done",
+]) {
+  check(`ถาม: ${command}`, () => assert.equal(bash(command), "ask"));
+}
+
+console.log("\nsed: only the numeric print-range form is read-only");
+for (const command of [
+  'sed -n "1,12p" drafts/x.md',
+  "sed -n '5p' file.md",
+  "sed -n 12p file.md",
+  "cat x.md | sed -n '1,3p'",
+]) {
+  check(`อนุญาต: ${command}`, () => assert.equal(bash(command), "allow"));
+}
+for (const command of [
+  "sed -i 's/a/b/' f.md", // in-place edit
+  "sed 's/a/b/' f.md", // no -n: prints a rewrite, and s///w can write
+  "sed -n 'w/tmp/x' 1,12p", // hostile script in the script POSITION
+  "sed -n -e '1p' f.md", // -e reopens arbitrary scripts
+  "sed -ne '1p' f.md", // bundled flag hides -e
+  "sed -n '$p' f.md", // only numeric ranges — $ addresses stay out
+]) {
+  check(`ถาม: ${command}`, () => assert.equal(bash(command), "ask"));
+}
+
 console.log(failures === 0 ? "\nall policy checks passed" : `\n${failures} check(s) failed`);
 process.exit(failures === 0 ? 0 : 1);

@@ -65,6 +65,7 @@ const BASH_ALLOWLIST: Record<string, true | string[]> = {
   stat: true,
   du: true,
   df: true,
+  sed: true, // print-range form only — see FLAG_GUARDS
   sort: true,
   uniq: true,
   cut: true,
@@ -165,7 +166,26 @@ const CHAIN_OPERATORS = /&&|\|\||[|;&\n]/;
  * `sort -o`, `git branch -D`. Each guard receives the tokens after the command
  * (and after the subcommand, for `git`) and must confirm they are read-only.
  */
+/** The only sed script shape we accept: a numeric print range like '1,12p'. */
+const SED_PRINT_RANGE = /^["']?\d+(,\d+)?p["']?$/;
+
 const FLAG_GUARDS: Record<string, (args: string[]) => boolean> = {
+  /**
+   * sed is allowed ONLY as `sed -n 'N[,M]p' [file…]` — the print-a-range
+   * idiom agents reach for constantly. Every other form asks: sed scripts
+   * can write files via the `w` command and `-i` edits in place. Position
+   * matters: sed treats the FIRST non-option word as the script, so the
+   * guard checks that word specifically — a hostile script cannot hide in
+   * front while a file literally named "1,12p" satisfies a loose scan.
+   */
+  sed: (args) => {
+    if (!args.includes("-n")) return false;
+    const operands = args.filter((arg) => arg !== "-n");
+    if (operands.some((arg) => arg.startsWith("-"))) return false;
+    const [script, ...files] = operands;
+    if (script === undefined || !SED_PRINT_RANGE.test(script)) return false;
+    return files.every(isPlainWord);
+  },
   /**
    * find writes only through its action predicates, and they are a closed set
    * that is always written as its own word — so naming them is exact, whereas
@@ -439,31 +459,64 @@ function isReadOnlyBash(command: string, extraAllow: string[]): boolean {
   return segments.every((segment) => {
     const tokens = tokenize(segment);
     if (tokens.length === 0) return false;
-
-    // `cd /some/dir` on its own only moves the shell's cursor.
-    if (tokens[0] === "cd") return true;
-
-    const joined = tokens.join(" ");
-    if (extraAllow.some((prefix) => joined === prefix || joined.startsWith(`${prefix} `))) {
-      return true;
-    }
-
-    const command = tokens[0]!;
-    const allowed = BASH_ALLOWLIST[command];
-    if (allowed === undefined) return false;
-
-    if (allowed === true) {
-      const guard = FLAG_GUARDS[command];
-      return guard ? guard(tokens.slice(1)) : true;
-    }
-
-    const subcommand = tokens[1];
-    if (subcommand === undefined) return false;
-    if (!allowed.includes(subcommand)) return false;
-
-    const guard = SUBCOMMAND_GUARDS[command]?.[subcommand];
-    return guard ? guard(tokens.slice(2)) : true;
+    return segmentAllowed(tokens, extraAllow);
   });
+}
+
+/** A word that cannot expand into a flag or assignment inside a later command. */
+function isPlainWord(token: string): boolean {
+  return !token.startsWith("-") && !token.includes("=");
+}
+
+const FOR_VARIABLE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+function segmentAllowed(tokens: string[], extraAllow: string[]): boolean {
+  // `cd /some/dir` on its own only moves the shell's cursor.
+  if (tokens[0] === "cd") return true;
+
+  // `for f in <plain words>` runs nothing by itself — it only sets up
+  // iteration. The body arrives as its own `do …` segment (the chain split
+  // cuts on `;`) and is checked like any command. The words may not look
+  // like flags or assignments, so a loop variable can never smuggle an
+  // option (e.g. f="-o") past a FLAG_GUARD in the body. `while`/`until`
+  // still ask: their condition IS a command and they can loop forever.
+  if (tokens[0] === "for") {
+    return (
+      tokens.length >= 4 &&
+      FOR_VARIABLE.test(tokens[1] ?? "") &&
+      tokens[2] === "in" &&
+      tokens.slice(3).every(isPlainWord)
+    );
+  }
+
+  // `do <command>` — unwrap and check the command itself.
+  if (tokens[0] === "do") {
+    return tokens.length > 1 && segmentAllowed(tokens.slice(1), extraAllow);
+  }
+
+  // Bare `done` closes a loop and runs nothing.
+  if (tokens[0] === "done" && tokens.length === 1) return true;
+
+  const joined = tokens.join(" ");
+  if (extraAllow.some((prefix) => joined === prefix || joined.startsWith(`${prefix} `))) {
+    return true;
+  }
+
+  const command = tokens[0]!;
+  const allowed = BASH_ALLOWLIST[command];
+  if (allowed === undefined) return false;
+
+  if (allowed === true) {
+    const guard = FLAG_GUARDS[command];
+    return guard ? guard(tokens.slice(1)) : true;
+  }
+
+  const subcommand = tokens[1];
+  if (subcommand === undefined) return false;
+  if (!allowed.includes(subcommand)) return false;
+
+  const guard = SUBCOMMAND_GUARDS[command]?.[subcommand];
+  return guard ? guard(tokens.slice(2)) : true;
 }
 
 export function decide(

@@ -20,4 +20,6 @@
 - `drafts/` — `content-maker` สร้าง (`pending-review`) → คนตัดสินผ่าน skill `approve-content` (`approved` / `rejected` / เคลียร์ `post-failed`) → `fb-publisher` โพสต์ (`posting` → `posted` / `post-failed`) · รูปของ draft อยู่ที่ `drafts/assets/<draft-id>.png`
 - `archive/` — `workspace-janitor` ย้ายไฟล์จบงานเกินอายุมาพัก (งานค้างกลางทางไม่ถูกย้าย — แค่ถูกรายงาน)
 
+เกร็ดการทำงาน: อ่านไฟล์ด้วย Read tool หรือ `cat`/`head`/`sed -n 'N,Mp'` (ใส่หลายไฟล์หรือ glob ในคำสั่งเดียวได้ เช่น `head -20 trends/*.md`) — เลี่ยง `awk`/`while` และ sed รูปอื่น (`-i`, `s///`) เพราะจะติดขออนุมัติเปล่า ๆ
+
 ถ้าคุณถูกสั่งงานในโฟลเดอร์นี้โดยไม่ได้ระบุ skill: อ่าน `README.md` ก่อนแตะไฟล์ของ pipeline
