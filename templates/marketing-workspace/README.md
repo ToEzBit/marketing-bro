@@ -22,14 +22,14 @@ brand/            ← ข้อมูลแบรนด์ (คนเติม, 
 config/pipeline.md ← ค่าตั้ง: เพจเป้าหมาย จำนวน draft ต่อรอบ เพดานโพสต่อวัน
 trends/           ← trend-scout เขียน (1 ไฟล์ = 1 Trend)
 drafts/           ← content-maker เขียน (1 ไฟล์ = 1 Draft) รูปอยู่ใน drafts/assets/
-archive/          ← ไฟล์ที่จบงานแล้วเกินอายุ ถูก fb-publisher ย้ายมาพัก (รูปย้ายตาม draft)
+archive/          ← ไฟล์ที่จบงานแล้วเกินอายุ ถูก workspace-janitor ย้ายมาพัก (รูปย้ายตาม draft)
 ```
 
 ## ใครเขียนไฟล์ไหน
 
 | ไฟล์ | คนสร้าง | คนแก้สถานะ |
 |---|---|---|
-| `trends/*.md` | trend-scout (`status: new`) | content-maker (`used` / `skipped`) · fb-publisher (`new` ค้างเกินอายุ → `skipped` "expired") |
+| `trends/*.md` | trend-scout (`status: new`) | content-maker (`used` / `skipped`) · workspace-janitor (`new` ค้างเกินอายุ → `skipped` "expired" แล้วย้ายเข้า archive) |
 | `drafts/*.md` | content-maker (`status: pending-review`) | คนผ่าน approve-content (`approved` / `rejected` และเคลียร์ `post-failed`) · fb-publisher (`posting` → `posted` / `post-failed`) |
 | `brand/*`, `config/pipeline.md` | คน (Operator/Member) เท่านั้น | คน |
 
@@ -53,13 +53,16 @@ pending-review ──คนอนุมัติ──> approved ──fb-publis
 1. เติม `brand/brand.md`, `brand/products.md`, `brand/voice/facebook.md` แล้วเปลี่ยน `status: unfilled` → `status: ready` ทุกไฟล์
 2. เติม `config/pipeline.md` (อย่างน้อย `target_page`) แล้วเปลี่ยนเป็น `status: ready`
 3. Operator ล็อกอิน Facebook (และเว็บ gen รูป) ค้างไว้: `npm run browser:login` — **ปิดหน้าต่างนั้นก่อนถึงเวลารันของ Schedule** ไม่งั้น browser ของบอทเปิดไม่ขึ้น
-4. สร้าง Schedule 3 อัน **ในห้องข้อความหลัก** (สั่งในเธรดไม่ได้) — ตั้ง prompt ให้ต่างกันเพราะชื่อเธรดมาจาก prompt:
+4. สร้าง Schedule 4 อัน **ในห้องข้อความหลัก** (สั่งในเธรดไม่ได้) — ตั้ง prompt ให้ต่างกันเพราะชื่อเธรดมาจาก prompt:
 
 ```
-/schedule create prompt:"ส่องเทรนด์ประจำวัน"       skill:trend-scout   at:08:00 browser:true
-/schedule create prompt:"ทำ draft จากเทรนด์"       skill:content-maker at:10:00 browser:true
-/schedule create prompt:"โพสต์ draft ที่อนุมัติแล้ว" skill:fb-publisher  at:13:00 browser:true
+/schedule create prompt:"ส่องเทรนด์ประจำวัน"       skill:trend-scout      at:08:00 browser:true
+/schedule create prompt:"ทำ draft จากเทรนด์"       skill:content-maker    at:10:00 browser:true
+/schedule create prompt:"โพสต์ draft ที่อนุมัติแล้ว" skill:fb-publisher     at:13:00 browser:true
+/schedule create prompt:"เก็บกวาดไฟล์เก่า"          skill:workspace-janitor at:23:30
 ```
+
+(workspace-janitor ไม่ต้องใส่ `browser:true` — งานเก็บกวาดไม่แตะเว็บ ไม่ต่อคิว browser กับใคร)
 
 ตัวอย่างนี้ไม่ใส่ `path:` เพราะถือว่า `DEFAULT_WORKSPACE` ของบอทชี้โฟลเดอร์นี้ — ถ้าเครื่องนี้ตั้งค่าไว้ต่างจากนี้ ให้เติม `path:{{WORKSPACE_PATH}}` ทุกคำสั่ง
 

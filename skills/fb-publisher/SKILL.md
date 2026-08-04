@@ -77,22 +77,9 @@ rules), oldest `approved_at` first. Take at most as many as remain under
    either re-approve (post truly absent) or record it as posted (post is
    live).
 
-## Housekeeping (end of run)
-
-- Archive: move finished files older than `archive_after_days` into
-  `archive/` — trends `used`/`skipped` (age by the date in the filename),
-  drafts `posted` (age by `posted_at`) and `rejected` (age by `rejected_at`,
-  falling back to `created_at`). Keep filenames unchanged, and move a
-  draft's asset file from `drafts/assets/` along with it.
-- Trends still `status: new` but older than `archive_after_days` are dead
-  for a virality pipeline: set `status: skipped` +
-  `skip_reason: "expired"`, then archive them too.
-- Drafts stuck at `pending-review` / `approved` / `post-failed` older than
-  the threshold: do NOT archive — list them in your report so a human
-  decides.
-
 ## Reporting
 
 Thai summary in the thread: posted (id + link each), restored-to-approved
-(id + cause), failed (id + error), skipped and why, files archived, stuck
-drafts needing a human. Close extra tabs and close the browser.
+(id + cause), failed (id + error), skipped and why. Close extra tabs and
+close the browser. (Archiving old files is not your job — the
+`workspace-janitor` skill handles it in its own schedule.)
