@@ -963,7 +963,10 @@ export class Bot {
       decide: async (toolName, input, { signal }) => {
         if (!isBrowserTool(toolName)) return decide(toolName, input, this.config.extraBashAllow);
         const decision = decideBrowser(toolName, {
-          approved: this.browserApproved.has(record.threadId),
+          // BROWSER_AUTO_APPROVE (ADR 0008): the Operator pre-granted the
+          // once-per-Task browser Approval; the always-ask tools still ask.
+          approved:
+            this.browserApproved.has(record.threadId) || this.config.browserAutoApprove,
         });
         if (decision.action !== "allow") return decision;
         // An approved task stands in the Browser queue inside this pending

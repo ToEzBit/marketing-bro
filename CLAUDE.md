@@ -13,6 +13,7 @@ Discord bot ที่สั่งงาน Claude Agent SDK บนเครื�
   - [0005](./docs/adr/0005-skills-central-folder-via-plugin.md) — Skill โหลดจากโฟลเดอร์กลางระดับบอท ผ่าน plugin ของ SDK
   - [0006](./docs/adr/0006-browser-queue.md) — Browser เข้าคิวรอ (FIFO) แทนการปฏิเสธเมื่อไม่ว่าง
   - [0007](./docs/adr/0007-content-pipeline-md-handoff.md) — Content pipeline ส่งงานข้าม Schedule ด้วยไฟล์ md + คนอนุมัติก่อนโพสต์
+  - [0008](./docs/adr/0008-operator-preapproved-browser.md) — Operator ปิด Approval ครั้งแรกของ browser ใน Task ได้ผ่าน config (BROWSER_AUTO_APPROVE)
 
 ## คำสั่ง
 

@@ -91,7 +91,8 @@ npm run dev
 | `ALLOWED_USER_IDS` | — | user ID ทีมภายใน คั่นด้วยจุลภาค คนนอกรายการถูกปฏิเสธ (operator ถูกเพิ่มให้เสมอ — เว้นว่าง = ใช้ได้คนเดียว) |
 | `DEFAULT_WORKSPACE` | — | โฟลเดอร์เริ่มต้นเมื่อ `/task`/`/schedule` ไม่ระบุ `path` และเป็นที่ที่ `workspace:init` สร้าง content pipeline (ADR 0007) — ต้องอยู่นอก repo |
 | `DEFAULT_MODEL` | — | `sonnet` (ค่าเริ่มต้น) / `opus` / `haiku` |
-| `EXTRA_BASH_ALLOW` | — | คำสั่ง shell ที่ให้ผ่านอัตโนมัติเพิ่ม เช่น `make test,poetry run pytest` |
+| `EXTRA_BASH_ALLOW` | — | คำสั่ง shell ที่ให้ผ่านอัตโนมัติเพิ่ม เช่น `make test,poetry run pytest` — ⚠️ ใส่ `cp`/`mv` = Bash เขียนไฟล์ได้ทุกที่โดยไม่ถาม (ADR 0008) |
+| `BROWSER_AUTO_APPROVE` | — | `true` = Task ไม่ต้องขออนุมัติ browser ครั้งแรก (สอง tool อันตรายยังถามเสมอ) — ทบทวนก่อนเพิ่มคนใน allowlist (ADR 0008) |
 | `APPROVAL_TIMEOUT_MS` | — | หมดเวลารออนุมัติ (ค่าเริ่มต้น 10 นาที = ปฏิเสธอัตโนมัติ) |
 | `SESSION_IDLE_TIMEOUT_MS` | — | ปิด subprocess ของ session ที่ว่างเกินเวลานี้ (ค่าเริ่มต้น 30 นาที) บริบทเธรดไม่หาย |
 | `SESSION_STATE_PATH` | — | ที่เก็บ mapping thread→session สำหรับ resume หลังรีสตาร์ต |
@@ -130,7 +131,9 @@ npm run dev
 ยกเว้นการอัปโหลดไฟล์จากเครื่องขึ้นเว็บ (`browser_file_upload`) และการรันโค้ดผ่าน
 browser (`browser_run_code_unsafe`) ที่ขอทุกครั้ง เพราะสองอย่างนี้ย้อนมาแตะเครื่อง
 host ได้ (ADR 0003) · บัญชีที่ล็อกอินค้างไว้ใน profile เป็นของ Operator และสมาชิก
-ทุกคนใช้ร่วมกันผ่านบอท
+ทุกคนใช้ร่วมกันผ่านบอท · ตั้ง `BROWSER_AUTO_APPROVE=true` เพื่อข้ามการขออนุมัติ
+ครั้งแรกได้ (เหมาะกับบอทที่ Operator ใช้คนเดียว — สอง tool อันตรายยังถามเสมอ
+ดูเงื่อนไขและความเสี่ยงใน ADR 0008)
 
 **Schedule** — ตอนรันไม่มีคนเฝ้า จึงใช้ **Grant** ที่มอบตอนสร้างแทนปุ่มอนุมัติ:
 พื้นฐานคืออ่าน/เขียนใน workspace + Bash ทุกคำสั่ง ส่วน browser ต้องเลือกมอบเพิ่ม

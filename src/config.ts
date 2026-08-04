@@ -27,6 +27,11 @@ export type Config = {
   scheduleStatePath: string;
   /** Chrome profile the agent's browser uses. Holds real logins — never commit. */
   browserProfileDir: string;
+  /**
+   * Skip the once-per-Task browser Approval in interactive Tasks (ADR 0008).
+   * The two host-escape tools (file upload / run_code_unsafe) still ask.
+   */
+  browserAutoApprove: boolean;
   /** Central Skill folder the Operator drops skill folders into (ADR 0005). */
   skillsDir: string;
   /** Generated plugin scaffold the SDK loads the skills through. */
@@ -56,6 +61,11 @@ function positiveInt(name: string, fallback: number): number {
     return fallback;
   }
   return Math.floor(parsed);
+}
+
+/** Reads a boolean env var — "true" / "1" / "yes" (case-insensitive) mean on. */
+function flag(name: string): boolean {
+  return ["true", "1", "yes"].includes(process.env[name]?.trim().toLowerCase() ?? "");
 }
 
 function list(name: string): string[] {
@@ -103,6 +113,7 @@ export function loadConfig(): Config {
     browserProfileDir: expandPath(
       process.env.BROWSER_PROFILE_DIR ?? "./.state/browser-profile",
     ),
+    browserAutoApprove: flag("BROWSER_AUTO_APPROVE"),
     skillsDir: expandPath(process.env.SKILLS_DIR ?? DEFAULT_SKILLS_DIR),
     skillsPluginDir: expandPath("./.state/skills-plugin"),
   };
