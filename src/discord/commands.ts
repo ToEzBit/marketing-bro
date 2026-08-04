@@ -151,7 +151,11 @@ export function buildCommands(): RESTPostAPIApplicationCommandsJSONBody[] {
     .setName("status")
     .setDescription("ดูสถานะบอทและงานที่กำลังรัน");
 
-  return [task, ask, schedule, stop, status].map((command) => command.toJSON());
+  const help = new SlashCommandBuilder()
+    .setName("help")
+    .setDescription("วิธีใช้บอทเบื้องต้น — มีคำสั่งอะไร ใช้ยังไง");
+
+  return [task, ask, schedule, stop, status, help].map((command) => command.toJSON());
 }
 
 export async function registerCommands(options: {

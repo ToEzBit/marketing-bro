@@ -232,6 +232,9 @@ export class Bot {
       case "status":
         await this.onStatus(interaction);
         return;
+      case "help":
+        await this.onHelp(interaction);
+        return;
       default:
         await interaction.reply({
           content: `ไม่รู้จักคำสั่ง ${interaction.commandName}`,
@@ -469,6 +472,25 @@ export class Bot {
     });
     await interaction.reply({
       content: [`**งานทั้งหมด ${this.sessions.size} งาน**`, ...lines].join("\n"),
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  private async onHelp(interaction: ChatInputCommandInteraction): Promise<void> {
+    await interaction.reply({
+      content: [
+        "**วิธีใช้บอทเบื้องต้น**",
+        "",
+        "🧵 `/task prompt:…` — สั่งงานหลัก: บอทเปิดเธรดให้ (1 งาน = 1 เธรด) พิมพ์ในเธรดเพื่อคุยต่อ/สั่งเพิ่มได้เรื่อย ๆ — พิมพ์ระหว่างที่กำลังทำงาน = แทรกคำสั่ง บอทติด 👀 ให้",
+        "❓ `/ask prompt:…` — คำถามสั้น ๆ ตอบในห้องเดิม ไม่เปิดเธรด ไม่เก็บบริบท อ่าน/ค้นได้อย่างเดียว แก้เครื่องไม่ได้",
+        "⏰ `/schedule create prompt:… every:2h` (หรือ `at:08:00`) — งานรันซ้ำเองตามรอบ · จัดการด้วย `/schedule list | run | pause | resume | delete` — pause คือเบรกฉุกเฉิน กดได้ทุกคน",
+        "🛑 `/stop` — หยุดงานในเธรดนั้น · 📊 `/status` — ดูงานที่กำลังรันทั้งหมด",
+        "",
+        "ตัวเลือกเสริมของ `/task` และ `/schedule create`:",
+        "🧩 `skill:` เลือกสูตรงานสำเร็จรูป (พิมพ์เพื่อค้นหา · ไม่ระบุ = agent เลือกเอง) · 📂 `path:` โฟลเดอร์ทำงาน (ไม่ระบุ = workspace กลาง) · 🧠 `model:` โมเดล",
+        "",
+        "🔐 คำสั่งเสี่ยง (เช่น ลบไฟล์ หรือใช้ browser ครั้งแรกของงาน) จะขึ้นปุ่มขอ Approval ในเธรด — คนสั่งงานหรือ Operator เป็นคนกด ส่วน Schedule ไม่ถามตอนรัน: ใช้สิทธิ์ที่มอบไว้ตอนสร้างแทน (เช่น `browser:true`)",
+      ].join("\n"),
       flags: MessageFlags.Ephemeral,
     });
   }

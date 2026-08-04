@@ -79,7 +79,28 @@ error:
 ## Images
 
 Posts usually perform better with an image, but text-only is fine when the
-post carries itself. To generate one, use the `image-gen` skill (load it
+post carries itself.
+
+**Crafting the image prompt — build it from the finished post, not from the
+trend:**
+
+1. Finish the post text first. Reread it and extract its single key
+   message — the one idea a reader should keep.
+2. Describe one concrete scene that shows that message (subject, setting,
+   action). A viewer who never reads the caption should still get the
+   post's angle — never illustrate "the trend" in general.
+3. Apply the brand look from `brand/visual.md` (style, palette, mood,
+   must-have / must-not list). If that file is missing or still
+   `status: unfilled`, infer a restrained style from `brand/brand.md`
+   instead, and note in your report that filling `brand/visual.md` would
+   make images consistent.
+4. Always: write the prompt in English (generation follows it more
+   reliably), put no text inside the image (image models mangle Thai; the
+   post text carries the words), and respect the ข้อห้าม in `brand/brand.md`.
+
+Record the final prompt verbatim in the draft's `image_prompt` field.
+
+To generate the image, use the `image-gen` skill (load it
 with the Skill tool and follow it — it uses the browser, which may queue).
 The download lands in `.browser-output/`: **copy the exact file path
 reported by the download for THIS image to

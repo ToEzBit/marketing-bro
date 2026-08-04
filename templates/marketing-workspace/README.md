@@ -19,6 +19,7 @@ brand/            ← ข้อมูลแบรนด์ (คนเติม, 
   brand.md          ตัวตนแบรนด์ กลุ่มลูกค้า ข้อห้าม
   products.md       สินค้า/บริการ
   voice/facebook.md คาแรคเตอร์+โทนต่อแพลตฟอร์ม (เพิ่ม x.md / tiktok.md ในอนาคต)
+  visual.md         สไตล์ภาพสำหรับ gen รูปประกอบ (optional — ไม่เติมก็รันได้ แต่สไตล์รูปจะไม่นิ่ง)
 config/pipeline.md ← ค่าตั้ง: เพจเป้าหมาย จำนวน draft ต่อรอบ เพดานโพสต่อวัน
 trends/           ← trend-scout เขียน (1 ไฟล์ = 1 Trend)
 drafts/           ← content-maker เขียน (1 ไฟล์ = 1 Draft) รูปอยู่ใน drafts/assets/
@@ -50,7 +51,7 @@ pending-review ──คนอนุมัติ──> approved ──fb-publis
 
 ## เริ่มใช้งานครั้งแรก
 
-1. เติม `brand/brand.md`, `brand/products.md`, `brand/voice/facebook.md` แล้วเปลี่ยน `status: unfilled` → `status: ready` ทุกไฟล์
+1. เติม `brand/brand.md`, `brand/products.md`, `brand/voice/facebook.md` แล้วเปลี่ยน `status: unfilled` → `status: ready` ทุกไฟล์ (`brand/visual.md` เติมทีหลังได้ — ไม่บังคับ แต่ช่วยให้รูปที่ gen ออกมาสไตล์เดียวกันทุกโพสต์)
 2. เติม `config/pipeline.md` (อย่างน้อย `target_page`) แล้วเปลี่ยนเป็น `status: ready`
 3. Operator ล็อกอิน Facebook (และเว็บ gen รูป) ค้างไว้: `npm run browser:login` — **ปิดหน้าต่างนั้นก่อนถึงเวลารันของ Schedule** ไม่งั้น browser ของบอทเปิดไม่ขึ้น
 4. สร้าง Schedule 4 อัน **ในห้องข้อความหลัก** (สั่งในเธรดไม่ได้) — ตั้ง prompt ให้ต่างกันเพราะชื่อเธรดมาจาก prompt:
