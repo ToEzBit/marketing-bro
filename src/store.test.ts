@@ -8,7 +8,7 @@
  * many concurrent put()s never race each other into a torn file.
  */
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ScheduleStore, type ScheduleRecord } from "./schedule-store.js";
@@ -176,21 +176,25 @@ await check("many concurrent put()s all land without racing, and no .tmp is left
   assert.deepEqual(await tmpLeftovers(dir), [], "no .tmp file left on disk");
 });
 
-await check("a write interrupted before rename leaves the previous good file intact", async () => {
-  const dir = await tempDir();
-  const path = join(dir, "sessions.json");
-  const good: TaskRecord = {
+function goodTask(): TaskRecord {
+  return {
     threadId: "thread-1",
     ownerId: "owner",
     workspace: "/tmp/ws",
     model: "sonnet",
     createdAt: new Date().toISOString(),
   };
+}
+
+await check("a stray .tmp left behind by a crashed write is ignored on load", async () => {
+  const dir = await tempDir();
+  const path = join(dir, "sessions.json");
+  const good = goodTask();
   await writeFile(path, `${JSON.stringify([good], null, 2)}\n`, "utf8");
 
-  // Simulates a crash between write() and rename(): a stray .tmp sits next
-  // to the real file, but the real file was never touched — write() only
-  // ever swaps it in with a single rename, so it's all-or-nothing.
+  // The half-written tmp a crash between writeFile() and rename() would
+  // leave behind: load() reads this.path only, so it is neither loaded nor
+  // mistaken for a corrupt state file.
   await writeFile(`${path}.tmp`, `[{"threadId":"half-writ`, "utf8");
 
   const store = new TaskStore(path);
@@ -198,6 +202,35 @@ await check("a write interrupted before rename leaves the previous good file int
 
   assert.deepEqual(store.get("thread-1"), good, "the last good file, not the stray tmp, is what loads");
   assert.equal(await corruptSibling(dir, "sessions.json"), undefined, "a stray .tmp is not treated as corruption");
+});
+
+await check("a write interrupted before rename leaves the previous good file intact", async () => {
+  const dir = await tempDir();
+  const path = join(dir, "sessions.json");
+  const good = goodTask();
+  const goodBytes = `${JSON.stringify([good], null, 2)}\n`;
+  await writeFile(path, goodBytes, "utf8");
+
+  const store = new TaskStore(path);
+  await store.load();
+
+  // Wedges the real write path open at exactly the crash window: a directory
+  // sitting at the tmp path makes writeFile(tmpPath) fail before rename() can
+  // run. A write that targeted this.path directly would already have
+  // truncated the good file by this point.
+  await mkdir(`${path}.tmp`);
+
+  await assert.rejects(
+    () => store.put({ ...good, threadId: "thread-2" }),
+    "a write that never reached rename() surfaces as a rejection, not a silent success",
+  );
+
+  assert.equal(await readFile(path, "utf8"), goodBytes, "the previous good file is byte-for-byte untouched");
+  const reloaded = new TaskStore(path);
+  await captureErrors(() => reloaded.load());
+  assert.deepEqual(reloaded.get("thread-1"), good, "and it still loads as valid state");
+  assert.equal(reloaded.get("thread-2"), undefined, "the record whose write failed never reached disk");
+  assert.equal(await corruptSibling(dir, "sessions.json"), undefined, "nothing was quarantined");
 });
 
 console.log("\nScheduleStore — corrupted state files");
@@ -357,15 +390,15 @@ await check("put()s and a delete() queue in call order instead of racing", async
   assert.deepEqual(await tmpLeftovers(dir), []);
 });
 
-await check("a write interrupted before rename leaves the previous good file intact", async () => {
+await check("a stray .tmp left behind by a crashed write is ignored on load", async () => {
   const dir = await tempDir();
   const path = join(dir, "schedules.json");
   const good = scheduleRecord();
   await writeFile(path, `${JSON.stringify([good], null, 2)}\n`, "utf8");
 
-  // Simulates a crash between write() and rename(): a stray .tmp sits next
-  // to the real file, but the real file was never touched — write() only
-  // ever swaps it in with a single rename, so it's all-or-nothing.
+  // The half-written tmp a crash between writeFile() and rename() would
+  // leave behind: load() reads this.path only, so it is neither loaded nor
+  // mistaken for a corrupt state file.
   await writeFile(`${path}.tmp`, `[{"id":"half-writ`, "utf8");
 
   const store = new ScheduleStore(path);
@@ -373,6 +406,34 @@ await check("a write interrupted before rename leaves the previous good file int
 
   assert.deepEqual(store.get(good.id), good, "the last good file, not the stray tmp, is what loads");
   assert.equal(await corruptSibling(dir, "schedules.json"), undefined, "a stray .tmp is not treated as corruption");
+});
+
+await check("a write interrupted before rename leaves the previous good file intact", async () => {
+  const dir = await tempDir();
+  const path = join(dir, "schedules.json");
+  const good = scheduleRecord();
+  const goodBytes = `${JSON.stringify([good], null, 2)}\n`;
+  await writeFile(path, goodBytes, "utf8");
+
+  const store = new ScheduleStore(path);
+  await store.load();
+
+  // Wedges the real write path open at exactly the crash window: a directory
+  // sitting at the tmp path makes writeFile(tmpPath) fail before rename() can
+  // run. A write that targeted this.path directly would already have
+  // truncated the good file by this point.
+  await mkdir(`${path}.tmp`);
+
+  await assert.rejects(
+    () => store.put(scheduleRecord({ id: "s2" })),
+    "a write that never reached rename() surfaces as a rejection, not a silent success",
+  );
+
+  assert.equal(await readFile(path, "utf8"), goodBytes, "the previous good file is byte-for-byte untouched");
+  const reloaded = new ScheduleStore(path);
+  await captureErrors(() => reloaded.load());
+  assert.deepEqual(reloaded.all(), [good], "and it still loads as valid state, without the failed write's record");
+  assert.equal(await corruptSibling(dir, "schedules.json"), undefined, "nothing was quarantined");
 });
 
 if (failures > 0) {
