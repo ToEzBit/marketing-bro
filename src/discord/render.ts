@@ -70,6 +70,16 @@ export function truncate(text: string, limit: number): string {
 }
 
 /**
+ * Reports the status message's id the moment one is actually created, and
+ * undefined the moment it's actually gone — so a caller (never this class)
+ * can persist the id and later find/fix a message stranded by a crash
+ * (issue #5). Always fires from inside the same enqueued work that really
+ * creates/removes the message, never eagerly off the caller's intent, so the
+ * last value the hook reported is always still true.
+ */
+export type StatusMessageHook = (messageId: string | undefined) => void;
+
+/**
  * Posts agent output into a Discord thread: prose as messages, tool activity as
  * a single status message that gets edited in place so long runs don't spam.
  */
@@ -82,7 +92,10 @@ export class ThreadReporter {
   /** Serializes sends so messages land in the order they were produced. */
   private tail: Promise<unknown> = Promise.resolve();
 
-  constructor(private readonly thread: Postable) {}
+  constructor(
+    private readonly thread: Postable,
+    private readonly onStatusMessage?: StatusMessageHook,
+  ) {}
 
   /** Queues work on the send chain; failures are logged, never thrown at callers. */
   private enqueue(work: () => Promise<unknown>): Promise<void> {
@@ -150,6 +163,7 @@ export class ThreadReporter {
     await this.enqueue(async () => {
       await message.delete().catch(() => undefined);
     });
+    this.onStatusMessage?.(undefined);
   }
 
   private renderStatus(): string {
@@ -182,6 +196,7 @@ export class ThreadReporter {
         await this.statusMessage.edit(content);
       } else {
         this.statusMessage = await this.thread.send(content);
+        this.onStatusMessage?.(this.statusMessage.id);
       }
     });
   }

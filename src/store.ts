@@ -9,6 +9,13 @@ export type TaskRecord = {
   model: string;
   /** Claude Code session id, used to resume context after a bot restart. */
   sessionId?: string;
+  /**
+   * Id of the thread's current "⚙️ กำลังใช้…" status message, if one exists
+   * right now — set the moment ThreadReporter creates one, cleared the
+   * moment it's removed. Lets a startup sweep find and fix one stranded by a
+   * crash instead of lying in the thread forever (issue #5).
+   */
+  statusMessageId?: string;
   createdAt: string;
 };
 
@@ -47,6 +54,10 @@ export class TaskStore {
     return this.records.get(threadId);
   }
 
+  all(): TaskRecord[] {
+    return [...this.records.values()];
+  }
+
   async put(record: TaskRecord): Promise<void> {
     this.records.set(record.threadId, record);
     await this.flush();
@@ -56,6 +67,14 @@ export class TaskStore {
     const record = this.records.get(threadId);
     if (!record || record.sessionId === sessionId) return;
     record.sessionId = sessionId;
+    await this.flush();
+  }
+
+  /** Mirrors setSessionId: no record, or already this value, is a silent no-op. */
+  async setStatusMessageId(threadId: string, statusMessageId: string | undefined): Promise<void> {
+    const record = this.records.get(threadId);
+    if (!record || record.statusMessageId === statusMessageId) return;
+    record.statusMessageId = statusMessageId;
     await this.flush();
   }
 

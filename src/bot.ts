@@ -63,6 +63,14 @@ const SCHEDULE_DEADLINE_GRACE_MS = 90_000;
 /** One message for every way a waiter leaves the Browser queue unserved. */
 const BROWSER_WAIT_CANCELLED = "งานถูกยกเลิกระหว่างรอคิว browser";
 
+/**
+ * Replaces a status message a crash stranded mid-turn (issue #5) — editing
+ * rather than deleting it, so the thread still shows what happened. Exported
+ * for src/status-reconcile.test.ts, so the test asserts against this text
+ * instead of a second copy of the literal that could quietly drift from it.
+ */
+export const STATUS_MESSAGE_INTERRUPTED = "♻️ งานถูกขัดจังหวะเพราะบอทรีสตาร์ต — พิมพ์ในเธรดเพื่อทำต่อ";
+
 /** Button under a skipped/failed round; pressing it reruns that schedule once. */
 const RERUN_BUTTON_PREFIX = "schedule-rerun:";
 
@@ -141,8 +149,7 @@ export class Bot {
       console.log(`[bot] default workspace: ${this.config.defaultWorkspace}`);
       console.log(`[bot] allowed users: ${this.config.allowedUserIds.join(", ")}`);
       // Threads are only reachable once logged in, so the engine starts here.
-      this.scheduler.start();
-      console.log(`[bot] scheduler started with ${this.scheduleStore.all().length} schedule(s)`);
+      void this.startEngine();
     });
 
     this.client.on(Events.InteractionCreate, (interaction) => {
@@ -189,6 +196,24 @@ export class Bot {
     this.idleSweeper.unref();
 
     await this.client.login(this.config.discordToken);
+  }
+
+  /**
+   * Runs once, right after login: a status message a crash stranded mid-turn
+   * (issue #5) must be found and fixed before the scheduler starts, so the
+   * sweep can never race a live reporter about to create or clear one of its
+   * own. reconcileStatusMessages never throws, so nothing here can block
+   * startup — mirrors sweepOrphans() in start() (issue #6).
+   */
+  private async startEngine(): Promise<void> {
+    await reconcileStatusMessages(this.store, (threadId) =>
+      this.client.channels
+        .fetch(threadId)
+        .then((channel) => (channel?.isThread() ? channel : undefined))
+        .catch(() => undefined),
+    );
+    this.scheduler.start();
+    console.log(`[bot] scheduler started with ${this.scheduleStore.all().length} schedule(s)`);
   }
 
   async shutdown(): Promise<void> {
@@ -974,7 +999,19 @@ export class Bot {
    * calls this as its factory — nothing here writes to `this.sessions`.
    */
   private createSession(thread: Postable, record: TaskRecord): LiveSession {
-    const reporter = new ThreadReporter(thread);
+    // Persists the thread's live status message id as it comes and goes, so
+    // a crash mid-turn leaves a trail startup's reconcileStatusMessages can
+    // find and fix (issue #5) instead of a "⚙️ กำลังใช้…" message that lies
+    // forever. /ask and scheduled Runs build their ThreadReporter directly,
+    // skipping this — neither has a persistent TaskRecord to write onto.
+    const reporter = new ThreadReporter(thread, (messageId) => {
+      void this.store.setStatusMessageId(record.threadId, messageId).catch((error: unknown) => {
+        console.error(
+          `[bot] failed to persist status message id for thread ${record.threadId}:`,
+          error,
+        );
+      });
+    });
     // Assigned the moment the session exists, below. The hooks only ever read
     // it from the SDK's message pump, long after this function has returned.
     let live: LiveSession | undefined;
@@ -1183,4 +1220,65 @@ export function formatSummary(summary: TurnSummary): string {
       : `⚠️ จบแบบมีปัญหา (${seconds}s) — ไม่มีรายละเอียดที่อ่านรู้เรื่อง ดู log ฝั่ง Host`;
   }
   return `-# ✅ เสร็จใน ${seconds}s · ${summary.turns} turns`;
+}
+
+/** Fetches the thread a TaskRecord names, or undefined if it's gone/unreachable. */
+export type ThreadFetcher = (threadId: string) => Promise<Postable | undefined>;
+
+/**
+ * Startup sweep for issue #5: ThreadReporter only ever tracked its status
+ * message in memory, so a "⚙️ กำลังใช้…" message survives a crash and lies
+ * forever about a task still running. Called from Bot.startEngine, before
+ * scheduler.start() — every statusMessageId this sweep can see at that point
+ * is either stale (from before this restart) or already gone, never one a
+ * Scheduled Run is actively writing to right now.
+ *
+ * A Task message can still land independently through Discord's own message
+ * event at any point during the sweep, though, and build a brand-new
+ * ThreadReporter for a thread this sweep hasn't reached yet — each record is
+ * resolved with several awaited Discord calls, so that is not a narrow
+ * window. reconcileOneStatusMessage only ever clears a field that still
+ * names the id it started with, so a live reporter's message can never be
+ * stripped of its tracking by a sweep still working through an older one.
+ *
+ * Never throws: a single record's failure — its thread or message already
+ * gone, a fetch error — is logged at most and always ends the same way, by
+ * clearing the field (unless superseded, above), so the sweep converges to a
+ * clean state and never blocks startup or repeats the same record forever.
+ */
+export async function reconcileStatusMessages(
+  store: TaskStore,
+  fetchThread: ThreadFetcher,
+): Promise<void> {
+  for (const record of store.all()) {
+    if (!record.statusMessageId) continue;
+    await reconcileOneStatusMessage(store, fetchThread, record.threadId, record.statusMessageId);
+  }
+}
+
+async function reconcileOneStatusMessage(
+  store: TaskStore,
+  fetchThread: ThreadFetcher,
+  threadId: string,
+  statusMessageId: string,
+): Promise<void> {
+  try {
+    const thread = await fetchThread(threadId);
+    const message = thread
+      ? await thread.messages.fetch(statusMessageId).catch(() => undefined)
+      : undefined;
+    if (message) await message.edit(STATUS_MESSAGE_INTERRUPTED);
+  } catch (error) {
+    console.error(`[bot] failed to reconcile status message for thread ${threadId}:`, error);
+  }
+  // A message can already be routed to a brand-new session (and a brand-new
+  // ThreadReporter) before this sweep — which spans several awaited Discord
+  // calls — finishes with this same thread. Only clear the field if it still
+  // names the stale id this call started with; otherwise a live reporter
+  // already replaced it, and clearing now would strip tracking off a status
+  // message that actually exists.
+  if (store.get(threadId)?.statusMessageId !== statusMessageId) return;
+  await store.setStatusMessageId(threadId, undefined).catch((error: unknown) => {
+    console.error(`[bot] failed to clear stale status message id for thread ${threadId}:`, error);
+  });
 }
