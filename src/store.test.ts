@@ -176,6 +176,30 @@ await check("many concurrent put()s all land without racing, and no .tmp is left
   assert.deepEqual(await tmpLeftovers(dir), [], "no .tmp file left on disk");
 });
 
+await check("a write interrupted before rename leaves the previous good file intact", async () => {
+  const dir = await tempDir();
+  const path = join(dir, "sessions.json");
+  const good: TaskRecord = {
+    threadId: "thread-1",
+    ownerId: "owner",
+    workspace: "/tmp/ws",
+    model: "sonnet",
+    createdAt: new Date().toISOString(),
+  };
+  await writeFile(path, `${JSON.stringify([good], null, 2)}\n`, "utf8");
+
+  // Simulates a crash between write() and rename(): a stray .tmp sits next
+  // to the real file, but the real file was never touched — write() only
+  // ever swaps it in with a single rename, so it's all-or-nothing.
+  await writeFile(`${path}.tmp`, `[{"threadId":"half-writ`, "utf8");
+
+  const store = new TaskStore(path);
+  await store.load();
+
+  assert.deepEqual(store.get("thread-1"), good, "the last good file, not the stray tmp, is what loads");
+  assert.equal(await corruptSibling(dir, "sessions.json"), undefined, "a stray .tmp is not treated as corruption");
+});
+
 console.log("\nScheduleStore — corrupted state files");
 
 function scheduleRecord(overrides: Partial<ScheduleRecord> = {}): ScheduleRecord {
@@ -331,6 +355,24 @@ await check("put()s and a delete() queue in call order instead of racing", async
   const onDisk = JSON.parse(await readFile(path, "utf8"));
   assert.deepEqual(onDisk, [b]);
   assert.deepEqual(await tmpLeftovers(dir), []);
+});
+
+await check("a write interrupted before rename leaves the previous good file intact", async () => {
+  const dir = await tempDir();
+  const path = join(dir, "schedules.json");
+  const good = scheduleRecord();
+  await writeFile(path, `${JSON.stringify([good], null, 2)}\n`, "utf8");
+
+  // Simulates a crash between write() and rename(): a stray .tmp sits next
+  // to the real file, but the real file was never touched — write() only
+  // ever swaps it in with a single rename, so it's all-or-nothing.
+  await writeFile(`${path}.tmp`, `[{"id":"half-writ`, "utf8");
+
+  const store = new ScheduleStore(path);
+  await store.load();
+
+  assert.deepEqual(store.get(good.id), good, "the last good file, not the stray tmp, is what loads");
+  assert.equal(await corruptSibling(dir, "schedules.json"), undefined, "a stray .tmp is not treated as corruption");
 });
 
 if (failures > 0) {
