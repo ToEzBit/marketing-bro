@@ -92,6 +92,24 @@ check("does not match another project's copy at a different repo root", () => {
   assert.equal(isProjectSdkBinary(command, REPO_ROOT), false);
 });
 
+check(
+  "the same command line only matches when repoRoot actually points at it — a fixture sharing " +
+    "no prefix with REPO_ROOT (like the check above) would pass even if repoRoot were ignored " +
+    "entirely, so this pins down that it genuinely is compared, not just \"claude-agent-sdk-*/claude " +
+    'appears somewhere"',
+  () => {
+    // Two absolute roots that share a directory-name prefix — e.g. two
+    // checkouts of this same project on one machine, which is exactly this
+    // project's own worktree-parallel workflow (CLAUDE.md/#6: "ticket อื่น
+    // ผ่าตัดไฟล์นี้ขนานกันอยู่"). The separator joined right after repoRoot
+    // is what keeps them from being confused for each other.
+    const otherRoot = `${REPO_ROOT}-other-checkout`;
+    const command = `${otherRoot}/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude`;
+    assert.equal(isProjectSdkBinary(command, otherRoot), true, "sanity: valid under its own root");
+    assert.equal(isProjectSdkBinary(command, REPO_ROOT), false);
+  },
+);
+
 check("does not match a claude installed globally, outside any node_modules", () => {
   assert.equal(isProjectSdkBinary("/usr/local/bin/claude --resume abc", REPO_ROOT), false);
 });
