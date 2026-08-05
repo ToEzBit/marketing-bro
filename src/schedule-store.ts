@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
 import type { Recurrence } from "./recurrence.js";
@@ -35,14 +35,22 @@ export class ScheduleStore {
   constructor(private readonly path: string) {}
 
   async load(): Promise<void> {
+    let raw: string;
     try {
-      const raw = await readFile(this.path, "utf8");
-      const parsed = JSON.parse(raw) as ScheduleRecord[];
-      for (const record of parsed) {
+      raw = await readFile(this.path, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) throw new Error("state file does not contain a JSON array");
+      for (const record of parsed as ScheduleRecord[]) {
         this.records.set(record.id, record);
       }
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      await this.quarantine(raw, error);
     }
   }
 
@@ -72,6 +80,28 @@ export class ScheduleStore {
     await this.flush();
   }
 
+  /**
+   * A state file that can't be parsed must never block startup. Move it
+   * aside (never delete it — an Operator may want to recover it by hand)
+   * and log loudly, then carry on with empty state. Baseline b269ed3 let
+   * this throw out of load() straight into main(), which exits the process.
+   */
+  private async quarantine(raw: string, error: unknown): Promise<void> {
+    const quarantinePath = `${this.path}.corrupt-${timestampSuffix(new Date())}`;
+    try {
+      await rename(this.path, quarantinePath);
+    } catch {
+      // Original path is gone or unreadable by the time we got here (e.g. a
+      // cross-device state dir) — fall back to persisting what we already
+      // read, so the bytes are not lost even though the source stays put.
+      await writeFile(quarantinePath, raw, "utf8").catch(() => undefined);
+    }
+    console.error(
+      `[schedule-store] ${this.path} เสียหายหรือ parse ไม่ได้ — ย้ายไฟล์เดิมไปที่ ${quarantinePath} แล้วเริ่มด้วย state ว่าง (ตาราง Schedule จะหายไปจนกว่าจะกู้เอง) ตรวจไฟล์กักกันเพื่อกู้ข้อมูลเอง:`,
+      error,
+    );
+  }
+
   private flush(): Promise<void> {
     this.tail = this.tail.catch(() => undefined).then(() => this.write());
     return this.tail;
@@ -79,10 +109,14 @@ export class ScheduleStore {
 
   private async write(): Promise<void> {
     await mkdir(dirname(this.path), { recursive: true });
-    await writeFile(
-      this.path,
-      `${JSON.stringify([...this.records.values()], null, 2)}\n`,
-      "utf8",
-    );
+    const data = `${JSON.stringify([...this.records.values()], null, 2)}\n`;
+    const tmpPath = `${this.path}.tmp`;
+    await writeFile(tmpPath, data, "utf8");
+    await rename(tmpPath, this.path);
   }
+}
+
+/** Filesystem-safe timestamp for a quarantined file's suffix, e.g. 2026-08-05T12-00-00-000Z. */
+function timestampSuffix(date: Date): string {
+  return date.toISOString().replace(/[:.]/g, "-");
 }
