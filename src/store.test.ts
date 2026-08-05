@@ -5,7 +5,9 @@
  * baseline b269ed3 let SyntaxError escape load() straight into main(), which
  * exits the process, so a half-written state file meant the bot could never
  * boot again. Also asserts writes are atomic (tmp + rename) and queued, so
- * many concurrent put()s never race each other into a torn file.
+ * many concurrent put()s never race each other into a torn file, and that a
+ * write that dies before rename() leaves the previous good file byte-for-byte
+ * intact, with the orphaned .tmp neither loaded nor mistaken for corruption.
  */
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
