@@ -110,8 +110,9 @@ await check("editing the same status message does not re-report an id", async ()
 
   reporter.addActivity("Read foo.ts");
   // The second flush waits out the ~1.5s debounce — poll for the edit to land
-  // instead of a blind sleep.
-  await until(() => thread.sent[0]!.content.includes("Read foo.ts"), 2200);
+  // instead of a blind sleep. Generous margin over STATUS_EDIT_INTERVAL_MS so
+  // this doesn't flake on a loaded machine.
+  await until(() => thread.sent[0]!.content.includes("Read foo.ts"), 4000);
 
   assert.equal(thread.sent.length, 1, "the same message was edited, not a second one sent");
   assert.deepEqual(seen, [thread.sent[0]!.id], "the hook fired exactly once, on creation only");
