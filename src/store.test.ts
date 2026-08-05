@@ -109,6 +109,22 @@ await check("an empty file is quarantined the same way", async () => {
   assert.ok(await corruptSibling(dir, "sessions.json"), "a quarantine file was created for the empty file too");
 });
 
+await check("a JSON array that throws partway through still starts fully empty", async () => {
+  const dir = await tempDir();
+  const path = join(dir, "sessions.json");
+  // The first element would populate the map before the second (not a real
+  // record) throws while iterating — state must still end up fully empty,
+  // matching what the quarantine log tells the Operator, not one dangling
+  // record from before the throw.
+  await writeFile(path, JSON.stringify([{ threadId: "a" }, null]), "utf8");
+  const store = new TaskStore(path);
+
+  await captureErrors(() => store.load());
+
+  assert.equal(store.get("a"), undefined, "no partial record survives a mid-array failure");
+  assert.ok(await corruptSibling(dir, "sessions.json"));
+});
+
 await check("after quarantine the store is fully usable again", async () => {
   const dir = await tempDir();
   const path = join(dir, "sessions.json");
@@ -238,6 +254,23 @@ await check("valid JSON that isn't an array counts as corrupt too", async () => 
 
   await captureErrors(() => store.load());
 
+  assert.deepEqual(store.all(), []);
+  assert.ok(await corruptSibling(dir, "schedules.json"));
+});
+
+await check("a JSON array that throws partway through still starts fully empty", async () => {
+  const dir = await tempDir();
+  const path = join(dir, "schedules.json");
+  // The first element would populate the map before the second (not a real
+  // record) throws while iterating — state must still end up fully empty,
+  // matching what the quarantine log tells the Operator, not one dangling
+  // record from before the throw.
+  await writeFile(path, JSON.stringify([{ id: "a" }, null]), "utf8");
+  const store = new ScheduleStore(path);
+
+  await captureErrors(() => store.load());
+
+  assert.equal(store.get("a"), undefined, "no partial record survives a mid-array failure");
   assert.deepEqual(store.all(), []);
   assert.ok(await corruptSibling(dir, "schedules.json"));
 });

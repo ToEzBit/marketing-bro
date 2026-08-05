@@ -87,19 +87,35 @@ export class ScheduleStore {
    * this throw out of load() straight into main(), which exits the process.
    */
   private async quarantine(raw: string, error: unknown): Promise<void> {
+    // A parse failure partway through the array (e.g. a null element) may
+    // have already set a few records before throwing — state must start
+    // fully empty, matching what the log below tells the Operator.
+    this.records.clear();
+
     const quarantinePath = `${this.path}.corrupt-${timestampSuffix(new Date())}`;
+    let quarantined = true;
     try {
       await rename(this.path, quarantinePath);
     } catch {
       // Original path is gone or unreadable by the time we got here (e.g. a
       // cross-device state dir) — fall back to persisting what we already
       // read, so the bytes are not lost even though the source stays put.
-      await writeFile(quarantinePath, raw, "utf8").catch(() => undefined);
+      quarantined = await writeFile(quarantinePath, raw, "utf8")
+        .then(() => true)
+        .catch(() => false);
     }
-    console.error(
-      `[schedule-store] ${this.path} เสียหายหรือ parse ไม่ได้ — ย้ายไฟล์เดิมไปที่ ${quarantinePath} แล้วเริ่มด้วย state ว่าง (ตาราง Schedule จะหายไปจนกว่าจะกู้เอง) ตรวจไฟล์กักกันเพื่อกู้ข้อมูลเอง:`,
-      error,
-    );
+
+    if (quarantined) {
+      console.error(
+        `[schedule-store] ${this.path} เสียหายหรือ parse ไม่ได้ — ย้ายไฟล์เดิมไปที่ ${quarantinePath} แล้วเริ่มด้วย state ว่าง (ตาราง Schedule จะหายไปจนกว่าจะกู้เอง) ตรวจไฟล์กักกันเพื่อกู้ข้อมูลเอง:`,
+        error,
+      );
+    } else {
+      console.error(
+        `[schedule-store] ${this.path} เสียหายหรือ parse ไม่ได้ และกักกันไฟล์เดิมไม่สำเร็จ — เริ่มด้วย state ว่าง (ไฟล์เดิมอาจยังค้างอยู่ที่เดิม ยังไม่ถูกย้าย/สำรอง):`,
+        error,
+      );
+    }
   }
 
   private flush(): Promise<void> {
