@@ -36,6 +36,7 @@ import {
 import { registerCommands } from "./discord/commands.js";
 import { requestApproval } from "./discord/approval.js";
 import { ThreadReporter, describeTool, truncate, type Postable } from "./discord/render.js";
+import { sweepOrphans } from "./orphan-sweep.js";
 import { describeRecurrence, nextFireAt, parseRecurrence } from "./recurrence.js";
 import { ScheduleStore, type ScheduleRecord } from "./schedule-store.js";
 import { ensureSkillsPlugin, listSkills, withSkill } from "./skills.js";
@@ -113,6 +114,10 @@ export class Bot {
   }
 
   async start(): Promise<void> {
+    // Before anything else: reap this project's own orphaned claude CLIs from
+    // a previous hard crash, so a leaked Chrome isn't still holding the
+    // Browser Profile lock once a Task asks for it (issue #6).
+    sweepOrphans();
     await this.store.load();
     await this.scheduleStore.load();
     this.validateWorkspace();
