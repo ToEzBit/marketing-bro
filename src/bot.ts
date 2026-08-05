@@ -880,7 +880,9 @@ export class Bot {
         }),
         onSendFile: (buffer, filename, caption) => reporter.attach(buffer, filename, caption),
         onTurnEnd: async (summary) => {
-          ok = summary.ok;
+          // Only a turn that ran to the end counts; a Run stopped part-way
+          // (shutdown, say) produced no finished work, so it is not a success.
+          ok = summary.status === "ok";
           await reporter.clearStatus();
           await reporter.say(formatSummary(summary));
         },
@@ -1123,11 +1125,24 @@ function formatLocal(iso: string): string {
   return new Date(iso).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" });
 }
 
-function formatSummary(summary: TurnSummary): string {
+/**
+ * SDK error strings sometimes carry an internal diagnostic tag —
+ * `[ede_diagnostic] result_type=user …` — that tells a Member nothing. Those
+ * lines stay on the Host's console (the session logs them in full).
+ */
+const INTERNAL_DIAGNOSTIC = /^\s*\[[a-z0-9_]+\]/i;
+
+/** Exported for src/agent-session.test.ts — this is the text a Member reads. */
+export function formatSummary(summary: TurnSummary): string {
   const seconds = (summary.durationMs / 1000).toFixed(1);
-  if (!summary.ok) {
-    const detail = summary.errors?.join("; ") ?? "ไม่ทราบสาเหตุ";
-    return `⚠️ จบแบบมีปัญหา (${seconds}s): ${truncate(detail, 1500)}`;
+  if (summary.status === "interrupted") {
+    return `🛑 หยุดโดยผู้ใช้ (${seconds}s)`;
+  }
+  if (summary.status === "failed") {
+    const detail = (summary.errors ?? []).filter((line) => !INTERNAL_DIAGNOSTIC.test(line));
+    return detail.length > 0
+      ? `⚠️ จบแบบมีปัญหา (${seconds}s): ${truncate(detail.join("; "), 1500)}`
+      : `⚠️ จบแบบมีปัญหา (${seconds}s) — ไม่มีรายละเอียดที่อ่านรู้เรื่อง ดู log ฝั่ง Host`;
   }
   return `-# ✅ เสร็จใน ${seconds}s · ${summary.turns} turns`;
 }
