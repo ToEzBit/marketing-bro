@@ -6,6 +6,7 @@ import {
   type PermissionResult,
   type Query,
   type SDKMessage,
+  type SDKResultMessage,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { createDiscordToolServer, type SendFile } from "./attachment-tool.js";
@@ -43,14 +44,41 @@ type ContentBlock =
   | { type: "tool_use"; name: string; input: Record<string, unknown> }
   | { type: string };
 
+/**
+ * How a turn ended. A stop the user asked for is its own outcome: the SDK
+ * reports the abort it causes as an execution error, but nobody wants to read
+ * their own `/stop` as something that broke.
+ */
+export type TurnStatus = "ok" | "failed" | "interrupted";
+
 export type TurnSummary = {
-  ok: boolean;
+  status: TurnStatus;
   durationMs: number;
   turns: number;
   costUsd: number;
-  /** Error strings from the SDK, when the turn failed. */
+  /**
+   * Raw error strings from the SDK, when the turn failed. They can carry
+   * internal diagnostics, so they are written for the Host's log — whoever
+   * shows a summary to a Member filters them first (`formatSummary` in bot.ts).
+   */
   errors?: string[];
 };
+
+/**
+ * The slice of the SDK's query that a session drives: a stream of messages it
+ * can interrupt. Narrow on purpose — a test can hand-write one of these.
+ */
+export type AgentStream = AsyncIterable<SDKMessage> & Pick<Query, "interrupt">;
+
+/**
+ * Starts the SDK query. Injected so a test can script a message stream instead
+ * of spawning a real Claude Code subprocess; production always uses the SDK's
+ * own `query`.
+ */
+export type StartQuery = (params: {
+  prompt: AsyncIterable<SDKUserMessage>;
+  options: Options;
+}) => AgentStream;
 
 export type ToolApprovalRequest = {
   toolName: string;
@@ -176,19 +204,26 @@ class MessageQueue implements AsyncIterable<SDKUserMessage> {
 export class AgentSession {
   private readonly queue = new MessageQueue();
   private readonly abortController = new AbortController();
-  private readonly stream: Query;
+  private readonly stream: AgentStream;
   private readonly pump: Promise<void>;
   private sessionId: string | undefined;
   private busy = false;
   private closed = false;
+  /**
+   * Set when someone asked the running turn to stop. This flag, not the shape
+   * of the SDK's error, is what makes the turn read as a stop instead of a
+   * failure.
+   */
+  private stopRequested = false;
   private turnEnded: (() => void) | undefined;
   private lastActivityAt = Date.now();
 
   constructor(
     private readonly config: SessionConfig,
     private readonly hooks: SessionHooks,
+    startQuery: StartQuery = query,
   ) {
-    this.stream = query({ prompt: this.queue, options: this.buildOptions() });
+    this.stream = startQuery({ prompt: this.queue, options: this.buildOptions() });
     this.pump = this.drain();
   }
 
@@ -216,7 +251,7 @@ export class AgentSession {
       return;
     }
     this.lastActivityAt = Date.now();
-    this.busy = true;
+    this.beginTurn();
     this.hooks.onHeadline("กำลังคิด");
     const finished = new Promise<void>((resolve) => {
       this.turnEnded = resolve;
@@ -227,7 +262,9 @@ export class AgentSession {
 
   /**
    * Injects a message into the running turn without waiting for it to end, so a
-   * user can redirect the agent mid-task.
+   * user can redirect the agent mid-task. The turn it lands in may be the
+   * running one or — when it arrives just as that one ends — a new one; either
+   * way the stream is what reports the session busy again, not this call.
    */
   steer(text: string): void {
     if (this.closed) throw new Error("session is closed");
@@ -235,8 +272,14 @@ export class AgentSession {
     this.queue.push(text);
   }
 
+  /**
+   * Asks the SDK to stop the running turn. Not guarded by {@link isBusy} on
+   * purpose: a brake must work even when the flag is out of date, and the flag
+   * this sets is what makes the turn that follows read as a stop.
+   */
   async interrupt(): Promise<void> {
-    if (!this.busy) return;
+    if (this.closed) return;
+    this.stopRequested = true;
     await this.stream.interrupt().catch((error: unknown) => {
       console.error("[agent] interrupt failed:", error);
     });
@@ -348,6 +391,10 @@ export class AgentSession {
 
   private async handle(message: SDKMessage): Promise<void> {
     this.lastActivityAt = Date.now();
+    // A turn can start without anyone calling send(): a steered message that
+    // lands just as the previous turn ends becomes a turn of its own. So the
+    // stream, not the caller, is what says this session is working.
+    if (!this.busy && startsTurn(message)) this.beginTurn();
     switch (message.type) {
       case "system": {
         if (message.subtype === "init") {
@@ -374,22 +421,7 @@ export class AgentSession {
       }
 
       case "result": {
-        const summary: TurnSummary =
-          message.subtype === "success"
-            ? {
-                ok: !message.is_error,
-                durationMs: message.duration_ms,
-                turns: message.num_turns,
-                costUsd: message.total_cost_usd,
-              }
-            : {
-                ok: false,
-                durationMs: message.duration_ms,
-                turns: message.num_turns,
-                costUsd: message.total_cost_usd,
-                errors: message.errors,
-              };
-        await this.hooks.onTurnEnd(summary);
+        await this.hooks.onTurnEnd(this.summarize(message));
         this.finishTurn();
         return;
       }
@@ -399,10 +431,60 @@ export class AgentSession {
     }
   }
 
+  /**
+   * Turns the SDK's end-of-turn result into the outcome a human is told about.
+   * A stop the user asked for arrives here as an execution error, so the stop
+   * flag is what separates the two. The SDK's `terminal_reason` only
+   * corroborates it — it is a free-form string that can change under us, so the
+   * brake still reads correctly if it does.
+   */
+  private summarize(message: SDKResultMessage): TurnSummary {
+    const base = {
+      durationMs: message.duration_ms,
+      turns: message.num_turns,
+      costUsd: message.total_cost_usd,
+    };
+    if (message.subtype === "success" && !message.is_error) {
+      return { ...base, status: "ok" };
+    }
+    if (this.stopRequested || message.terminal_reason?.startsWith("aborted")) {
+      return { ...base, status: "interrupted" };
+    }
+    // A "success" result that is flagged an error carries its detail as prose
+    // in `result` instead of an error list; either way something has to reach
+    // the Host's log, or the thread's "see the Host log" is a dead end.
+    const errors = message.subtype === "success" ? [message.result] : message.errors;
+    // The Host's log keeps the whole thing, diagnostics and all; what reaches
+    // the thread is filtered down to something a Member can act on.
+    console.error(
+      `[agent] turn failed (${message.subtype}, terminal_reason=${message.terminal_reason ?? "n/a"}):`,
+      errors,
+    );
+    return { ...base, status: "failed", errors };
+  }
+
+  private beginTurn(): void {
+    this.busy = true;
+    this.stopRequested = false;
+  }
+
   private finishTurn(): void {
     this.busy = false;
+    this.stopRequested = false;
     const resolve = this.turnEnded;
     this.turnEnded = undefined;
     resolve?.();
   }
+}
+
+/**
+ * Whether a message means a turn is running. Only assistant messages count:
+ * they exist only inside a turn and are always followed by a result, so busy is
+ * guaranteed to be cleared again. The expensive mistake is the other one — a
+ * session marked busy with no result coming would sit at 🟢 in `/status`
+ * forever and never be reaped by the idle sweeper — which rules out user
+ * messages, since a resumed session replays old ones outside any turn.
+ */
+function startsTurn(message: SDKMessage): boolean {
+  return message.type === "assistant";
 }

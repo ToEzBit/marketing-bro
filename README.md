@@ -177,7 +177,7 @@ src/
   config.ts           อ่าน/ตรวจ .env
   doctor.ts           เช็คสภาพก่อนใช้งาน (npm run doctor)
   whoami.ts           เช็คว่าบอทอยู่เซิร์ฟเวอร์ไหน + สิทธิ์ต่อห้อง (npm run whoami)
-  *.test.ts           เทสต์ policy, browser-queue, recurrence, scheduler, skills (npm test)
+  *.test.ts           เทสต์ policy, browser-queue, recurrence, scheduler, skills, agent-session (npm test)
   attachment.test.ts  เทสต์ว่า agent แนบไฟล์จริง (npm run test:agent — ใช้โควต้าเล็กน้อย)
   browser-profile.test.ts  เทสต์ว่า login ที่ทำไว้บอทเห็นจริง (npm run test:browser — ต้องมี Chrome)
   discord/
@@ -211,7 +211,7 @@ npm run doctor         # เช็ค auth + SDK ก่อนต่อ Discord
 npm run whoami         # เช็คว่าบอทอยู่เซิร์ฟเวอร์ไหน + สิทธิ์ต่อห้อง
 npm run browser:login  # เปิด Chrome ให้ Operator ล็อกอินเว็บที่จะให้บอทใช้
 npm run workspace:init # สร้าง workspace ของ content pipeline ที่ DEFAULT_WORKSPACE
-npm test               # เทสต์ policy, คิว browser, recurrence, scheduler, skills (เร็ว ไม่ใช้โควต้า)
+npm test               # เทสต์ policy, คิว browser, recurrence, scheduler, skills, agent session (เร็ว ไม่ใช้โควต้า)
 npm run test:agent     # เทสต์การแนบไฟล์ end-to-end (ใช้โควต้าเล็กน้อย)
 npm run test:browser   # เทสต์ว่า login ที่ทำไว้บอทอ่านเห็นจริง (ต้องมี Chrome)
 npm run build          # คอมไพล์ไป dist/
