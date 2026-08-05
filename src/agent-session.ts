@@ -447,7 +447,14 @@ export class AgentSession {
     if (message.subtype === "success" && !message.is_error) {
       return { ...base, status: "ok" };
     }
-    if (this.stopRequested || message.terminal_reason?.startsWith("aborted")) {
+    if (this.stopRequested) {
+      if (!message.terminal_reason?.startsWith("aborted")) {
+        // The flag decides; disagreement is only worth a trace — the SDK ended
+        // this turn some other way than the abort we asked for.
+        console.error(
+          `[agent] user stop, but terminal_reason=${message.terminal_reason ?? "n/a"} (expected aborted_*)`,
+        );
+      }
       return { ...base, status: "interrupted" };
     }
     // A "success" result that is flagged an error carries its detail as prose

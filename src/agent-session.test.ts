@@ -301,16 +301,20 @@ await check("the stop shows up as a neutral message, with no SDK diagnostic in i
   await finish();
 });
 
-await check("an abort nobody flagged still reads as a stop (SDK terminal_reason)", async () => {
-  // The secondary signal: something aborted the turn without going through
-  // interrupt() (a session closing under it, say). Still not a failure.
+await check("an abort nobody flagged is not blamed on the user", async () => {
+  // terminal_reason is corroboration only (spec #4: ธงผู้ใช้เป็นสัญญาณหลัก) — an
+  // abort that never went through interrupt() (a session closing under it,
+  // say) must not render as "หยุดโดยผู้ใช้", because nobody pressed /stop.
   const { session, stream, summaries, finish } = startSession();
   const sending = session.send("งานยาว");
   await stream.emit(assistantText("เริ่มแล้ว"));
   await stream.emit(resultAfterInterrupt());
   await sending;
 
-  assert.equal(summaries[0]?.status, "interrupted");
+  assert.equal(summaries[0]?.status, "failed");
+  const text = formatSummary(summaries[0]!);
+  assert.doesNotMatch(text, /หยุดโดยผู้ใช้/, "no user asked for this stop");
+  assert.doesNotMatch(text, /ede_diagnostic/, "internal diagnostics stay on the Host");
   await finish();
 });
 
