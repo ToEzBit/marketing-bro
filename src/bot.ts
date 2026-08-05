@@ -38,6 +38,7 @@ import { requestApproval } from "./discord/approval.js";
 import { ThreadReporter, describeTool, truncate, type Postable } from "./discord/render.js";
 import { describeRecurrence, nextFireAt, parseRecurrence } from "./recurrence.js";
 import { ScheduleStore, type ScheduleRecord } from "./schedule-store.js";
+import { SessionRegistry } from "./session-registry.js";
 import { ensureSkillsPlugin, listSkills, withSkill } from "./skills.js";
 import { MAX_CONSECUTIVE_FAILURES, Scheduler, type RunOutcome } from "./scheduler.js";
 import { TaskStore, type TaskRecord } from "./store.js";
@@ -70,8 +71,21 @@ const ASK_TOOLS = ["Read", "Glob", "Grep", "WebSearch", "WebFetch", SEND_FILE_TO
 export class Bot {
   private readonly client: Client;
   private readonly store: TaskStore;
-  private readonly sessions = new Map<string, LiveSession>();
-  /** `/ask` sessions, which live outside the per-thread map but still need closing. */
+  /**
+   * The one register of Agent Sessions per Task thread — nothing else here
+   * keeps a session. Reserving a thread's slot synchronously is what stops
+   * `/task` and a message that lands at the same moment from building two
+   * sessions for one thread, the second one orphaning the first.
+   */
+  private readonly sessions = new SessionRegistry<LiveSession>({
+    retire: async (live, threadId) => {
+      this.releaseBrowser(threadId);
+      this.browserApproved.delete(threadId);
+      await live.reporter.clearStatus();
+      await live.session.close();
+    },
+  });
+  /** `/ask` sessions, which live outside the register but still need closing. */
   private readonly transientSessions = new Set<AgentSession>();
   private readonly scheduleStore: ScheduleStore;
   private readonly scheduler: Scheduler;
@@ -152,7 +166,7 @@ export class Bot {
     });
 
     this.client.on(Events.ThreadDelete, (thread) => {
-      void this.closeSession(thread.id);
+      void this.sessions.close(thread.id);
     });
 
     await registerCommands({
@@ -177,7 +191,7 @@ export class Bot {
     if (this.idleSweeper) clearInterval(this.idleSweeper);
     this.scheduler.stop();
     await Promise.allSettled([
-      ...[...this.sessions.keys()].map((id) => this.closeSession(id)),
+      this.sessions.closeAll(),
       ...[...this.transientSessions].map((session) => session.close()),
       ...[...this.scheduleRuns.values()].map((session) => session.close()),
     ]);
@@ -187,11 +201,12 @@ export class Bot {
   }
 
   private async sweepIdleSessions(): Promise<void> {
-    for (const [threadId, live] of this.sessions) {
-      if (live.session.isBusy) continue;
-      if (live.session.idleForMs < this.config.sessionIdleTimeoutMs) continue;
-      console.log(`[bot] reaping idle session for thread ${threadId}`);
-      await this.closeSession(threadId);
+    const reaped = await this.sessions.sweepIdle(
+      (live) =>
+        !live.session.isBusy && live.session.idleForMs >= this.config.sessionIdleTimeoutMs,
+    );
+    for (const threadId of reaped) {
+      console.log(`[bot] reaped idle session for thread ${threadId}`);
     }
   }
 
@@ -340,10 +355,6 @@ export class Bot {
     const thread = await this.openThread(interaction, prompt);
     if (!thread) return;
 
-    // `/task` inside an existing task thread starts over: retire the old session
-    // rather than leaving its subprocess orphaned.
-    await this.closeSession(thread.id);
-
     const record: TaskRecord = {
       threadId: thread.id,
       ownerId: interaction.user.id,
@@ -351,20 +362,29 @@ export class Bot {
       model,
       createdAt: new Date().toISOString(),
     };
-    await this.store.put(record);
 
-    await thread.send(
-      [
-        `📋 **งานใหม่** โดย <@${interaction.user.id}>`,
-        `📂 \`${workspace.path}\``,
-        `🧠 \`${model}\``,
-        ...(picked.skill ? [`🧩 สกิล \`${picked.skill}\``] : []),
-        "",
-        "พิมพ์ในเธรดนี้เพื่อคุยต่อหรือสั่งเพิ่ม · `/stop` เพื่อสั่งหยุด",
-      ].join("\n"),
-    );
+    // `/task` inside a thread that already has a session starts over. The whole
+    // hand-over — retire the old session, announce the new task, build its
+    // session — is one operation of the register, so the thread never sits
+    // without an owner while this awaits Discord: a message arriving in the
+    // middle waits for this session instead of building a second one.
+    const live = await this.sessions.replace(thread.id, async () => {
+      await this.store.put(record);
+      await thread.send(
+        [
+          `📋 **งานใหม่** โดย <@${interaction.user.id}>`,
+          `📂 \`${workspace.path}\``,
+          `🧠 \`${model}\``,
+          ...(picked.skill ? [`🧩 สกิล \`${picked.skill}\``] : []),
+          "",
+          "พิมพ์ในเธรดนี้เพื่อคุยต่อหรือสั่งเพิ่ม · `/stop` เพื่อสั่งหยุด",
+        ].join("\n"),
+      );
+      return this.createSession(thread, record);
+    });
 
-    const live = this.createSession(thread, record);
+    // Outside the reservation: sending resolves only when the turn ends, and
+    // holding the slot that long would block the thread's own messages.
     await live.session.send(withSkill(prompt, picked.skill)).catch(async (error: unknown) => {
       await this.reportSessionFailure(live, error);
     });
@@ -466,7 +486,7 @@ export class Bot {
       });
       return;
     }
-    const lines = [...this.sessions.values()].map((live) => {
+    const lines = this.sessions.values().map((live) => {
       const state = live.session.isBusy ? "🟢 กำลังทำงาน" : "⚪ ว่าง";
       return `${state} <#${live.record.threadId}> · \`${live.record.workspace}\` · \`${live.record.model}\``;
     });
@@ -924,7 +944,11 @@ export class Bot {
       return;
     }
 
-    const live = this.sessions.get(thread.id) ?? this.createSession(thread, record);
+    // Either the thread's session, or the one `/task` is building right now —
+    // the register hands out one per thread, never a fresh rival.
+    const live = await this.sessions.getOrCreate(thread.id, () =>
+      this.createSession(thread, record),
+    );
 
     if (live.session.isBusy) {
       // Injected into the running turn so the user can redirect mid-task.
@@ -938,8 +962,15 @@ export class Bot {
     });
   }
 
+  /**
+   * Builds a thread's session. Registering it belongs to the register, which
+   * calls this as its factory — nothing here writes to `this.sessions`.
+   */
   private createSession(thread: Postable, record: TaskRecord): LiveSession {
     const reporter = new ThreadReporter(thread);
+    // Assigned the moment the session exists, below. The hooks only ever read
+    // it from the SDK's message pump, long after this function has returned.
+    let live: LiveSession | undefined;
     const session = new AgentSession(
       {
         workspace: record.workspace,
@@ -959,10 +990,20 @@ export class Bot {
           }),
         },
       },
-      this.buildHooks({ reporter, channel: thread, record, persist: true }),
+      this.buildHooks({
+        reporter,
+        channel: thread,
+        record,
+        persist: true,
+        // Death notice. Identity-checked inside the register, so a session
+        // that dies after a newer `/task` replaced it cannot unregister the
+        // one that took its place.
+        onDead: () => {
+          if (live) this.sessions.forget(record.threadId, live);
+        },
+      }),
     );
-    const live: LiveSession = { session, reporter, record };
-    this.sessions.set(record.threadId, live);
+    live = { session, reporter, record };
     return live;
   }
 
@@ -971,8 +1012,10 @@ export class Bot {
     channel: Postable;
     record: TaskRecord;
     persist: boolean;
+    /** Called when the session dies on its own. `/ask` sessions have none. */
+    onDead?: () => void;
   }): SessionHooks {
-    const { reporter, channel, record, persist } = context;
+    const { reporter, channel, record, persist, onDead } = context;
     const approverIds = [...new Set([record.ownerId, this.config.operatorUserId])];
 
     return {
@@ -1045,7 +1088,7 @@ export class Bot {
       onFatal: async (error, wasResuming) => {
         const detail = error instanceof Error ? error.message : String(error);
         console.error(`[bot] session died (resuming=${wasResuming}):`, error);
-        this.sessions.delete(record.threadId);
+        onDead?.();
         this.releaseBrowser(record.threadId);
         this.browserApproved.delete(record.threadId);
         await reporter.clearStatus();
@@ -1069,16 +1112,6 @@ export class Bot {
     console.error("[bot] session error:", error);
     await live.reporter.clearStatus();
     await live.reporter.say(`❌ งานล้มเหลว: ${detail}`);
-  }
-
-  private async closeSession(threadId: string): Promise<void> {
-    const live = this.sessions.get(threadId);
-    if (!live) return;
-    this.sessions.delete(threadId);
-    this.releaseBrowser(threadId);
-    this.browserApproved.delete(threadId);
-    await live.reporter.clearStatus();
-    await live.session.close();
   }
 
   /**

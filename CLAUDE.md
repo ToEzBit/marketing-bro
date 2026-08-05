@@ -21,7 +21,7 @@ Discord bot ที่สั่งงาน Claude Agent SDK บนเครื�
 npm run dev        # รันบอทแบบ watch (tsx)
 npm run build      # compile ลง dist/
 npm run typecheck  # tsc --noEmit
-npm test           # unit tests (policy, browser-queue, recurrence, scheduler, skills)
+npm test           # unit tests (policy, browser-queue, session-registry, recurrence, scheduler, skills, bot)
 npm run doctor     # เช็ค env/config ว่าพร้อมรัน
 npm run browser:login  # เปิด Chrome ด้วย profile ของบอท ให้ Operator ล็อกอินเว็บครั้งแรก
 npm run workspace:init # สร้าง workspace ของ content pipeline ที่ DEFAULT_WORKSPACE (ADR 0007)
