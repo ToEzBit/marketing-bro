@@ -5,3 +5,6 @@ dist/
 .env.local
 *.log
 .DS_Store
+
+# worktrees ของ agent ระหว่างพัฒนา
+.claude/worktrees/
