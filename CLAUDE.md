@@ -21,7 +21,7 @@ Discord bot ที่สั่งงาน Claude Agent SDK บนเครื�
 npm run dev        # รันบอทแบบ watch (tsx)
 npm run build      # compile ลง dist/
 npm run typecheck  # tsc --noEmit
-npm test           # unit tests (policy, browser-queue, session-registry, recurrence, scheduler, skills, store, agent-session, bot, orphan-sweep, render, status-reconcile)
+npm test           # unit tests (policy, browser-queue, session-registry, recurrence, scheduler, skills, store, agent-session, bot, orphan-sweep, render, status-reconcile, src/office/feed.test.ts, src/office/snapshot.test.ts, src/office/server.test.ts, office/app/layout.test.js, office/app/state.test.js)
 npm run doctor     # เช็ค env/config ว่าพร้อมรัน
 npm run browser:login  # เปิด Chrome ด้วย profile ของบอท ให้ Operator ล็อกอินเว็บครั้งแรก
 npm run workspace:init # สร้าง workspace ของ content pipeline ที่ DEFAULT_WORKSPACE (ADR 0007)
@@ -35,3 +35,4 @@ npm run test:browser   # เช็คว่า login ที่ทำผ่าน
 - ทุกการเปิด browser ต้องผ่าน `src/browser.ts` ที่เดียว (ทั้งของ Agent และของ Operator ตอนล็อกอิน) — เปิด Chrome เองตรง ๆ จะได้ profile ที่ล็อกอินแล้วแต่บอทมองไม่เห็น ดูเหตุผลใน ADR 0003
 - แก้พฤติกรรมที่กระทบสิทธิ์ผู้ใช้ (ใครสั่งอะไรได้ ต้อง Approval ไหม) = ต้องสอดคล้องกับ ADR 0002 หรือไม่ก็เขียน ADR ใหม่
 - โฟลเดอร์ `skills/` คือ instruction ที่ฉีดเข้า Agent ทุก session โดยไม่มีใครรีวิวซ้ำ (ADR 0005) — Operator เท่านั้นที่วางไฟล์ได้ อย่าเพิ่มช่องทางติดตั้ง skill ผ่าน Discord โดยไม่เขียน ADR ใหม่
+- Office UI เป็น read-only ตาม ADR 0002 — ห้ามเพิ่ม endpoint ที่สั่งงานหรือเปลี่ยน bind address โดยไม่เขียน ADR ใหม่ (และอัปเดตรายชื่อ test ในบล็อกคำสั่ง `npm test`)

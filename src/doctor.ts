@@ -94,6 +94,24 @@ async function main(): Promise<void> {
       : `${skillsDir} (ยังไม่มีสกิล — วางโฟลเดอร์ <ชื่อ>/SKILL.md เพื่อเพิ่ม, ADR 0005)`,
   );
 
+  console.log("\n— office ui —");
+  // Read directly from process.env (small local parse) instead of Config —
+  // officeUiPort may not exist on Config yet if that ticket hasn't merged;
+  // doctor must stay green independently either way.
+  const officeUiPortRaw = process.env.OFFICE_UI_PORT?.trim();
+  if (!officeUiPortRaw) {
+    report(true, "Office UI", "ปิดอยู่ (ตั้ง OFFICE_UI_PORT ใน .env เพื่อเปิด)");
+  } else {
+    const officeUiPort = Number(officeUiPortRaw);
+    if (Number.isFinite(officeUiPort) && officeUiPort > 0) {
+      report(true, "Office UI", `เปิดที่ http://127.0.0.1:${Math.floor(officeUiPort)}`);
+    } else {
+      console.log(
+        `⚠️  Office UI — OFFICE_UI_PORT="${officeUiPortRaw}" ไม่ใช่จำนวนเต็มบวก จะถูกมองว่าปิด`,
+      );
+    }
+  }
+
   console.log("\n— agent —");
   console.log("starting a one-turn query (no tools, no file access)…");
 

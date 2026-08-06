@@ -100,6 +100,7 @@ npm run dev
 | `SCHEDULE_STATE_PATH` | — | ที่เก็บข้อมูล schedule ให้รอดข้ามรีสตาร์ต (ค่าเริ่มต้น `./.state/schedules.json`) |
 | `SKILLS_DIR` | — | โฟลเดอร์ Skill กลาง (ค่าเริ่มต้น `./skills` — ADR 0005) |
 | `BROWSER_PROFILE_DIR` | — | Chrome profile ของบอท เก็บ login ค้างไว้ — อย่าเอาเข้า git (ค่าเริ่มต้น `./.state/browser-profile`) |
+| `OFFICE_UI_PORT` | — | เปิด Office UI ที่ `http://127.0.0.1:<port>` (ไม่ตั้ง = ปิด) — read-only ดูอย่างเดียว สั่งงานไม่ได้ |
 
 ---
 
@@ -157,6 +158,26 @@ public bot ([Commercial Terms](https://www.anthropic.com/legal/commercial-terms)
 
 ---
 
+## Office UI
+
+หน้าเว็บ **read-only** ที่บอทเสิร์ฟเองบน `127.0.0.1` ของเครื่อง Host — ดูได้อย่างเดียว
+สั่งงานไม่ได้ การสั่งงานยังต้องผ่าน Discord ตาม ADR 0002 เท่านั้น
+
+- **เปิดยังไง** — ตั้ง `OFFICE_UI_PORT=<port>` ใน `.env` แล้วรันบอทตามปกติ เปิดเบราว์เซอร์
+  ไปที่ `http://127.0.0.1:<port>` (ไม่ตั้งค่า = ปิดสนิท ไม่มี server ไม่มี timer ใด ๆ)
+  ผูกกับ `127.0.0.1` ตายตัวในโค้ด ไม่มี auth และไม่มี config ให้เปลี่ยน host —
+  อย่า forward port นี้ออกนอกเครื่อง
+- **เห็นอะไร** — ห้องออฟฟิศพิกเซล 1 ห้อง วาด Agent Session ของ Task และ Run ของ Schedule
+  เป็นตัวละครที่ย้ายโซนตามสถานะจริงของบอท ณ ขณะนั้น (ภาพ "ตอนนี้" ล้วน ไม่มีประวัติย้อนหลัง)
+  คลิกตัวละครดูรายละเอียดและลิงก์กลับไปเธรด Discord ได้ แต่ไม่มีปุ่มสั่งงานใด ๆ ในหน้านี้
+- **6 โซน** — ว่าง (lounge), กำลังทำงาน (desks), รอ Approval (เด่นที่สุดในห้อง), รอคิว–ถือ
+  Browser (ADR 0006), ล้มเหลว (bug), ถูกสั่งหยุด (stopped)
+- **สลับ art** — วางชุด sprite/tile ของตัวเองใน `office/assets/custom/` (ไม่ commit ลง git)
+  พร้อม `manifest.json` แล้ว refresh หน้าเว็บ ไม่มีชุด `custom/` จะ fallback ไปชุด
+  `office/assets/default/` ที่มากับ repo โดยไม่ต้องแก้โค้ดเลย
+
+---
+
 ## โครงสร้างโค้ด
 
 ```
@@ -186,6 +207,8 @@ src/
     render.ts         โพสต์ลงเธรด: ตัดข้อความ, แนบไฟล์, สถานะแบบแก้ข้อความเดิม
     approval.ts       ปุ่มอนุมัติ/ปฏิเสธ
 skills/               โฟลเดอร์ Skill กลาง — Operator เท่านั้นที่วางไฟล์ได้ (ADR 0005)
+office/               หน้าเว็บ Office UI (read-only, ADR 0002) — เสิร์ฟ static ตรง ๆ ไม่มี build step
+                       ดูวิธีเปิดและใช้งานในหัวข้อ "Office UI" ด้านบน
 ```
 
 ## รายละเอียดที่ตั้งใจออกแบบไว้
@@ -212,7 +235,9 @@ npm run doctor         # เช็ค auth + SDK ก่อนต่อ Discord
 npm run whoami         # เช็คว่าบอทอยู่เซิร์ฟเวอร์ไหน + สิทธิ์ต่อห้อง
 npm run browser:login  # เปิด Chrome ให้ Operator ล็อกอินเว็บที่จะให้บอทใช้
 npm run workspace:init # สร้าง workspace ของ content pipeline ที่ DEFAULT_WORKSPACE
-npm test               # เทสต์ policy, คิว browser, ทะเบียน session, recurrence, scheduler, skills, store, agent session, bot, orphan-sweep, render, status-reconcile (เร็ว ไม่ใช้โควต้า)
+npm test               # เทสต์ policy, คิว browser, ทะเบียน session, recurrence, scheduler, skills, store, agent session, bot, orphan-sweep, render, status-reconcile,
+                        # และ Office UI: src/office/feed.test.ts, src/office/snapshot.test.ts, src/office/server.test.ts,
+                        # office/app/layout.test.js, office/app/state.test.js (เร็ว ไม่ใช้โควต้า)
 npm run test:agent     # เทสต์การแนบไฟล์ end-to-end (ใช้โควต้าเล็กน้อย)
 npm run test:browser   # เทสต์ว่า login ที่ทำไว้บอทอ่านเห็นจริง (ต้องมี Chrome)
 npm run build          # คอมไพล์ไป dist/
