@@ -201,6 +201,23 @@ await check("acquiring before the deadline stops the deadline from firing later"
   assert.equal(queue.holder, "schedule:s1");
 });
 
+await check("waiting reports who is in line, in the order they will be served", async () => {
+  const queue = new BrowserQueue();
+  await queue.acquire("task-a");
+  assert.deepEqual(queue.waiting, [], "the holder is not one of the waiters");
+
+  void queue.acquire("task-b");
+  void queue.acquire("schedule:s1");
+  await settle(5);
+  assert.deepEqual(queue.waiting, ["task-b", "schedule:s1"]);
+
+  queue.release("task-a");
+  await settle(5);
+  // task-b took the browser, so only the schedule is still in line.
+  assert.equal(queue.holder, "task-b");
+  assert.deepEqual(queue.waiting, ["schedule:s1"]);
+});
+
 if (failures > 0) {
   console.error(`\n${failures} browser-queue test(s) failed`);
   process.exit(1);
