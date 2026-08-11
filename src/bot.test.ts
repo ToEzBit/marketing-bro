@@ -107,6 +107,8 @@ async function harness(): Promise<Harness> {
     browserAutoApprove: false,
     skillsDir: join(dir, "skills"),
     skillsPluginDir: join(dir, "skills-plugin"),
+    // Office UI off — this harness tests the bot, not the read-only web page (ADR 0002).
+    officeUiPort: undefined,
   };
   const bot = new Bot(config);
   // The bot's private surface is what the race lives in; the test drives it

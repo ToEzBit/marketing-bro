@@ -36,6 +36,12 @@ export type Config = {
   skillsDir: string;
   /** Generated plugin scaffold the SDK loads the skills through. */
   skillsPluginDir: string;
+  /**
+   * Port for the read-only Office UI on `127.0.0.1`. `undefined` = off, which is the default:
+   * no server, no timers, nothing. The page has no auth, so the host is hard-coded in
+   * `src/office/server.ts` and deliberately not configurable (ADR 0002).
+   */
+  officeUiPort: number | undefined;
 };
 
 /** Default Skill folder when SKILLS_DIR is unset — doctor reads it too. */
@@ -59,6 +65,21 @@ function positiveInt(name: string, fallback: number): number {
   if (!Number.isFinite(parsed) || parsed <= 0) {
     console.warn(`[config] ${name}="${raw}" is not a positive number; using ${fallback}`);
     return fallback;
+  }
+  return Math.floor(parsed);
+}
+
+/**
+ * Reads an optional positive-integer env var — undefined when unset or unusable.
+ * `positiveInt` above always needs a fallback, so it cannot express "off by default".
+ */
+function optionalPositiveInt(name: string): number | undefined {
+  const raw = process.env[name]?.trim();
+  if (!raw) return undefined;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    console.warn(`[config] ${name}="${raw}" is not a positive number; Office UI stays off`);
+    return undefined;
   }
   return Math.floor(parsed);
 }
@@ -116,5 +137,6 @@ export function loadConfig(): Config {
     browserAutoApprove: flag("BROWSER_AUTO_APPROVE"),
     skillsDir: expandPath(process.env.SKILLS_DIR ?? DEFAULT_SKILLS_DIR),
     skillsPluginDir: expandPath("./.state/skills-plugin"),
+    officeUiPort: optionalPositiveInt("OFFICE_UI_PORT"),
   };
 }
