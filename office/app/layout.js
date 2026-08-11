@@ -197,6 +197,45 @@ export function tileLayersOf(map) {
 }
 
 // ---------------------------------------------------------------------------
+// การจัดวางป้ายไม่ให้ทับกัน (spec §7.2) — pure ล้วน render.js เป็นคนวัดความกว้างจริงแล้วส่งกรอบมา
+// ---------------------------------------------------------------------------
+
+/** กรอบสี่เหลี่ยมสองอันชนกันไหม เผื่อช่องว่างขั้นต่ำ `gap` px รอบด้าน */
+export function boxesOverlap(a, b, gap = 0) {
+  return a.x1 - gap < b.x2 && a.x2 + gap > b.x1 && a.y1 - gap < b.y2 && a.y2 + gap > b.y1;
+}
+
+/**
+ * หาว่าต้องเลื่อนป้ายลงเท่าไรถึงจะไม่ทับกรอบที่จองไว้แล้ว — **ดันลงอย่างเดียว** ไม่ขยับซ้ายขวา
+ * (ป้ายต้องอยู่ตรงกับหัวตัวละครในแนวนอนเสมอ ไม่งั้นดูไม่ออกว่าเป็นของใคร)
+ *
+ * แต่ละรอบกระโดดไปใต้ "ขอบล่างที่ต่ำที่สุด" ของกรอบที่ชนอยู่ ไม่ใช่ขยับทีละก้าวคงที่ — ก้าวคงที่
+ * ที่สั้นกว่าความสูงป้ายสองบรรทัดจะเลื่อนแล้วยังทับอยู่ แล้วโควตาการเลื่อนหมดก่อนที่จะพ้นกัน
+ * @param {{x1:number,x2:number,y1:number,y2:number}} box กรอบของป้ายที่ตำแหน่งตั้งต้น
+ * @param {{x1:number,x2:number,y1:number,y2:number}[]} occupied กรอบที่ถูกจองไปแล้ว
+ * @param {{gap?:number, maxPush?:number, maxY?:number}} [opts]
+ * @returns {number} ระยะเลื่อนลง (px) — 0 คือวางที่ตำแหน่งตั้งต้นได้เลย
+ */
+export function resolveLabelShift(box, occupied, opts = {}) {
+  const gap = opts.gap ?? 2;
+  const maxPush = opts.maxPush ?? 10;
+  let shift = 0;
+  for (let i = 0; i < maxPush; i++) {
+    const moved = { x1: box.x1, x2: box.x2, y1: box.y1 + shift, y2: box.y2 + shift };
+    let lowest = null;
+    for (const other of occupied) {
+      if (!boxesOverlap(moved, other, gap)) continue;
+      lowest = lowest === null ? other.y2 : Math.max(lowest, other.y2);
+    }
+    if (lowest === null) break;
+    shift = lowest + gap + 1 - box.y1;
+  }
+  // ดันจนหลุดขอบล่างของห้องแล้วป้ายจะหายไปเลย — ยอมให้ทับดีกว่าอ่านไม่เห็น
+  if (opts.maxY != null && box.y2 + shift > opts.maxY) shift = Math.max(0, opts.maxY - box.y2);
+  return shift;
+}
+
+// ---------------------------------------------------------------------------
 // อนิเมชันตัวละคร (spec §7.4) — pure ล้วนเช่นกัน render.js เป็นคนเอาไป drawImage
 // ---------------------------------------------------------------------------
 

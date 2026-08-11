@@ -22,6 +22,7 @@ import {
   pickCharacterFolder,
   tileLayersOf,
   animationFrameIndex,
+  resolveLabelShift,
 } from "./layout.js";
 
 const STATE_META = {
@@ -50,11 +51,12 @@ const MIN_LABEL_TEXT_WIDTH = 24;
 const LABEL_LINE_H = 14;
 const LABEL_PLATE_H = 15;
 const LABEL_PLATE_PAD_X = 5;
-/** ป้ายที่ชนของเดิมถูกดันลงทีละ 1 แถว ไม่เกิน N ครั้ง (เกินกว่านั้นยอมให้ทับ ดีกว่าดันจนหลุดโซน) */
-const LABEL_PUSH_STEP = 15;
-const LABEL_MAX_PUSH = 6;
+/** จำนวนครั้งสูงสุดที่ยอมดันป้ายลงเพื่อหลบของเดิม (เกินกว่านี้ยอมให้ทับ ดีกว่าวนหาไม่จบ) */
+const LABEL_MAX_PUSH = 10;
 /** ช่องว่างขั้นต่ำระหว่างแผ่นป้ายสองอัน ก่อนจะถือว่า "ชน" */
 const LABEL_GAP = 2;
+/** ดันเกินระยะนี้แล้วป้ายเริ่มอยู่ห่างจากหัวตัวละครจนไม่รู้ว่าเป็นของใคร — ลากเส้นบาง ๆ โยงให้ */
+const LABEL_LEADER_MIN_SHIFT = 8;
 /** ชื่อท่าเดินใน manifest.character.animations — ท่าเดียวที่เล่นเป็นอนิเมชัน (spec §8.2 ตั้งชื่อไว้แบบนี้) */
 const WALK_ANIM = "walk";
 
@@ -100,13 +102,6 @@ function roundRectPath(ctx, x, y, w, h, r) {
   ctx.arcTo(x, y + h, x, y, r);
   ctx.arcTo(x, y, x + w, y, r);
   ctx.closePath();
-}
-
-/** กรอบสี่เหลี่ยมสองอันชนกันไหม (เผื่อช่องว่าง LABEL_GAP) */
-function boxesOverlap(a, b) {
-  return (
-    a.x1 - LABEL_GAP < b.x2 && a.x2 + LABEL_GAP > b.x1 && a.y1 - LABEL_GAP < b.y2 && a.y2 + LABEL_GAP > b.y1
-  );
 }
 
 /**
@@ -705,16 +700,25 @@ export function createRenderer({ canvas, zones, assets, roomSize }) {
         ].filter(Boolean),
       );
 
-      let y = item.y + 16;
-      let box = labelBox(item.x, y, prepared);
-      for (let push = 0; push < LABEL_MAX_PUSH && occupied.some((o) => boxesOverlap(o, box)); push++) {
-        y += LABEL_PUSH_STEP;
-        box = labelBox(item.x, y, prepared);
-      }
-      occupied.push(box);
+      const baseY = item.y + 16;
+      const box = labelBox(item.x, baseY, prepared);
+      const shift = resolveLabelShift(box, occupied, {
+        gap: LABEL_GAP,
+        maxPush: LABEL_MAX_PUSH,
+        maxY: H - 2,
+      });
+      occupied.push({ x1: box.x1, x2: box.x2, y1: box.y1 + shift, y2: box.y2 + shift });
 
       ctx.globalAlpha = item.alpha;
-      drawPreparedLabel(item.x, y, prepared);
+      if (shift >= LABEL_LEADER_MIN_SHIFT) {
+        ctx.strokeStyle = "rgba(255,255,255,.3)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(item.x, item.y + 4);
+        ctx.lineTo(item.x, baseY + shift - 12);
+        ctx.stroke();
+      }
+      drawPreparedLabel(item.x, baseY + shift, prepared);
       ctx.globalAlpha = 1;
     }
   }
