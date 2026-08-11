@@ -30,6 +30,9 @@ const ROLE_META = {
 const CHARACTER_LABEL_MAX_WIDTH = 108;
 /** ป้ายชื่อผู้ถือ Browser ที่โต๊ะ (บรรทัดเดียว ยาวกว่าปกติเพราะมีคำนำ/ต่อท้าย) กว้างได้เกือบเต็มโซน */
 const BROWSER_HOLDER_LABEL_MAX_WIDTH = 176;
+/** งบ (px) ขั้นต่ำที่ต้องเหลือให้ตัวข้อความหลักเสมอ แม้ `suffix` จะกว้างผิดคาด — กัน budget เหลือ 0
+ *  แล้ว clipTextToWidth มองว่า "ไม่จำกัด" (`!maxWidth`) ซึ่งจะทำให้ป้ายกลับไปทับกันเองอีก */
+const MIN_LABEL_TEXT_WIDTH = 24;
 
 function pad2(n) {
   return String(n).padStart(2, "0");
@@ -377,9 +380,16 @@ export function createRenderer({ canvas, zones, assets }) {
     ctx.textAlign = "center";
     let cursorY = y;
     for (const line of lines) {
-      if (!line.text) continue;
+      if (!line.text && !line.suffix) continue;
       ctx.font = line.font || (bold ? "bold 12px sans-serif" : sub ? "10px sans-serif" : "600 11px sans-serif");
-      const text = clipTextToWidth(ctx, line.text, line.maxWidth);
+      // `suffix` คือส่วนท้ายที่ต้องรอดจากการตัดเสมอ (นาฬิกา) — ตัดเฉพาะ `line.text` ในงบที่เหลือ
+      // ถ้าเอาสองส่วนมาต่อกันก่อนแล้วค่อยตัด ชื่อเธรดภาษาไทยความยาวปกติจะกินงบ 108px หมดตั้งแต่ชื่อ
+      // แล้วนาฬิกาซึ่งอยู่ท้ายสุดจะถูกตัดทิ้งทุกป้ายในห้อง (สังเกตว่า `ctx.font` ต้องถูกตั้งก่อนวัด)
+      const suffix = line.suffix || "";
+      const budget = line.maxWidth
+        ? Math.max(MIN_LABEL_TEXT_WIDTH, line.maxWidth - ctx.measureText(suffix).width)
+        : line.maxWidth;
+      const text = clipTextToWidth(ctx, line.text || "", budget) + suffix;
       const tw = ctx.measureText(text).width;
       ctx.fillStyle = line.bg || bg;
       roundRectPath(ctx, cx - tw / 2 - 5, cursorY - 12, tw + 10, 15, 5);
@@ -514,7 +524,9 @@ export function createRenderer({ canvas, zones, assets }) {
       ctx.globalAlpha = item.alpha;
       drawLabelPlate(item.x, item.y + 16, [
         {
-          text: `${item.meta.label}  ${clockGlyph}${clock.text}`,
+          text: item.meta.label,
+          // นาฬิกาเป็น `suffix` ไม่ใช่ส่วนหนึ่งของ text — ห้ามให้ชื่อเธรดยาว ๆ ตัดมันทิ้ง (spec §5.6)
+          suffix: `  ${clockGlyph}${clock.text}`,
           font: "600 10px sans-serif",
           maxWidth: CHARACTER_LABEL_MAX_WIDTH,
         },
