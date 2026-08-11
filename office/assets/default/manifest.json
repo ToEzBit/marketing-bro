@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "name": "LPC default",
+  "credits": "CREDITS.md",
+  "character": {
+    "frameSize": [64, 64],
+    "anchor": [32, 62],
+    "directions": ["up", "left", "down", "right"],
+    "animations": {
+      "walk": { "file": "walk.png", "frames": 9, "fps": 12 },
+      "idle": { "file": "idle.png", "frames": 2, "fps": 3 },
+      "sit": { "file": "sit.png", "frames": 3, "fps": 2 },
+      "sleep": { "fallback": "sit" }
+    },
+    "offset": [0, 0],
+    "folders": ["01", "02", "03", "04", "05", "06"]
+  },
+  "room": {
+    "tileset": "room/tileset.png",
+    "map": "room/map.json",
+    "tileSize": 32,
+    "scale": 1
+  },
+  "states": {
+    "idle": { "zone": "lounge", "anim": "idle" },
+    "working": { "zone": "desks", "anim": "sit" },
+    "approval": { "zone": "approval", "anim": "idle" },
+    "failed": { "zone": "bug", "anim": "sleep" },
+    "stopped": { "zone": "stopped", "anim": "idle" }
+  }
+}
