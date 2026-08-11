@@ -91,6 +91,17 @@ export type ToolApprovalRequest = {
   signal: AbortSignal;
 };
 
+/**
+ * An approval this session has asked a human about and is still waiting on.
+ * Read-only bookkeeping — the answer still comes from the hook, never from here.
+ */
+export type PendingApproval = {
+  toolName: string;
+  input: Record<string, unknown>;
+  /** When the request went out; the approval's own deadline counts from here. */
+  since: number;
+};
+
 export type SessionHooks = {
   /** Prose from the agent, ready to show the user. */
   onText: (text: string) => Promise<void> | void;
@@ -215,8 +226,19 @@ export class AgentSession {
    * failure.
    */
   private stopRequested = false;
+  /** Paired with {@link stopRequested}: set and cleared in the same places. */
+  private stopRequestedAtMs: number | undefined;
   private turnEnded: (() => void) | undefined;
   private lastActivityAt = Date.now();
+  private readonly createdAt = Date.now();
+  private turnStartedAtMs: number | undefined;
+  private lastTurnEnded: { summary: TurnSummary; endedAt: number } | undefined;
+  /**
+   * The approvals waiting on a human right now. A list, not one entry: the
+   * agent can call several tools in parallel, so more than one can be pending
+   * at a time (and the second must not overwrite the first).
+   */
+  private readonly waitingApprovals: PendingApproval[] = [];
 
   constructor(
     private readonly config: SessionConfig,
@@ -229,6 +251,49 @@ export class AgentSession {
 
   get isBusy(): boolean {
     return this.busy;
+  }
+
+  /**
+   * A turn is running and someone asked it to stop. Both halves matter: a
+   * `/stop` while idle leaves the flag set until the next turn starts, and that
+   * session is simply idle — nothing is being stopped.
+   */
+  get isStopping(): boolean {
+    return this.busy && this.stopRequested;
+  }
+
+  /** Whether the session is done for good — closed, or dead of its own accord. */
+  get isClosed(): boolean {
+    return this.closed;
+  }
+
+  /** When this session was created (epoch ms). */
+  get startedAt(): number {
+    return this.createdAt;
+  }
+
+  /** When the running turn began, or undefined between turns. */
+  get turnStartedAt(): number | undefined {
+    return this.turnStartedAtMs;
+  }
+
+  /**
+   * When the stop was asked for, cleared as soon as a turn begins or ends.
+   * A `/stop` while idle stamps it too, so pair it with {@link isStopping}:
+   * on its own it says a stop was asked for, not that one is under way.
+   */
+  get stopRequestedAt(): number | undefined {
+    return this.stopRequestedAtMs;
+  }
+
+  /** How the last finished turn ended, and when. Undefined until one has. */
+  get lastTurn(): { summary: TurnSummary; endedAt: number } | undefined {
+    return this.lastTurnEnded;
+  }
+
+  /** Copy of the approvals still waiting on a human, oldest first. */
+  get pendingApprovals(): PendingApproval[] {
+    return [...this.waitingApprovals];
   }
 
   /** Milliseconds since this session last sent or received anything. */
@@ -280,6 +345,7 @@ export class AgentSession {
   async interrupt(): Promise<void> {
     if (this.closed) return;
     this.stopRequested = true;
+    this.stopRequestedAtMs = Date.now();
     await this.stream.interrupt().catch((error: unknown) => {
       console.error("[agent] interrupt failed:", error);
     });
@@ -359,18 +425,28 @@ export class AgentSession {
     }
 
     this.hooks.onHeadline("รออนุมัติจากผู้ใช้");
-    const result = await this.hooks.onApprovalNeeded({
-      toolName,
-      input,
-      reason: verdict.reason,
-      ...(options.title ? { title: options.title } : {}),
-      ...(options.description ? { description: options.description } : {}),
-      ...(options.blockedPath ? { blockedPath: options.blockedPath } : {}),
-      ...(options.suggestions ? { suggestions: options.suggestions } : {}),
-      signal: options.signal,
-    });
-    this.hooks.onHeadline("กำลังคิด");
-    return result;
+    // Bookkeeping only, and it has to come off again on every way out of here —
+    // allowed, denied, timed out, or the tool call aborted under us. An entry
+    // left behind would show a session waiting on a human forever.
+    const pending: PendingApproval = { toolName, input, since: Date.now() };
+    this.waitingApprovals.push(pending);
+    try {
+      const result = await this.hooks.onApprovalNeeded({
+        toolName,
+        input,
+        reason: verdict.reason,
+        ...(options.title ? { title: options.title } : {}),
+        ...(options.description ? { description: options.description } : {}),
+        ...(options.blockedPath ? { blockedPath: options.blockedPath } : {}),
+        ...(options.suggestions ? { suggestions: options.suggestions } : {}),
+        signal: options.signal,
+      });
+      this.hooks.onHeadline("กำลังคิด");
+      return result;
+    } finally {
+      const index = this.waitingApprovals.indexOf(pending);
+      if (index !== -1) this.waitingApprovals.splice(index, 1);
+    }
   };
 
   /** Reads the SDK message stream for the life of the session. */
@@ -421,7 +497,11 @@ export class AgentSession {
       }
 
       case "result": {
-        await this.hooks.onTurnEnd(this.summarize(message));
+        const summary = this.summarize(message);
+        // Recorded before the hook runs: reporting the outcome to Discord takes
+        // as long as Discord takes, and the turn ended when the result arrived.
+        this.lastTurnEnded = { summary, endedAt: Date.now() };
+        await this.hooks.onTurnEnd(summary);
         this.finishTurn();
         return;
       }
@@ -473,11 +553,15 @@ export class AgentSession {
   private beginTurn(): void {
     this.busy = true;
     this.stopRequested = false;
+    this.stopRequestedAtMs = undefined;
+    this.turnStartedAtMs = Date.now();
   }
 
   private finishTurn(): void {
     this.busy = false;
     this.stopRequested = false;
+    this.stopRequestedAtMs = undefined;
+    this.turnStartedAtMs = undefined;
     const resolve = this.turnEnded;
     this.turnEnded = undefined;
     resolve?.();
