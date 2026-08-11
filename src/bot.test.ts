@@ -12,10 +12,14 @@
  */
 import assert from "node:assert/strict";
 import { mkdtemp } from "node:fs/promises";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { SessionHooks, TurnSummary } from "./agent-session.js";
 import { Bot } from "./bot.js";
 import type { Config } from "./config.js";
+import type { OfficeServerHandle, OfficeSnapshot } from "./office/types.js";
 
 let failures = 0;
 
@@ -85,9 +89,23 @@ type Harness = {
   /** The session the register holds for the thread, if any. */
   registered: () => FakeSession | undefined;
   registeredCount: () => number;
+  // ── Office UI (ticket #19) ────────────────────────────────────────────────
+  /** The room as the page would see it, straight off the live objects. */
+  snapshot: () => OfficeSnapshot;
+  /** The hooks a Task session runs under — where three of the five feed writes live. */
+  hooks: (options: { threadId: string; persist: boolean }) => SessionHooks;
+  /** What `startEngine()` does about the page, on its own. */
+  openOfficeUi: () => Promise<void>;
+  officeUi: () => OfficeServerHandle | undefined;
+  /** The login path in full, page included. */
+  startEngine: () => Promise<void>;
+  /** Counts writes to the outcome feed from the moment it is called. */
+  countFeedWrites: () => () => number;
+  /** Pretends a Task already got its once-per-Task browser Approval (ADR 0003). */
+  preapproveBrowser: (threadId: string) => void;
 };
 
-async function harness(): Promise<Harness> {
+async function harness(options: { officeUiPort?: number } = {}): Promise<Harness> {
   const dir = await mkdtemp(join(tmpdir(), "bot-race-test-"));
   const config: Config = {
     discordToken: "token",
@@ -107,8 +125,9 @@ async function harness(): Promise<Harness> {
     browserAutoApprove: false,
     skillsDir: join(dir, "skills"),
     skillsPluginDir: join(dir, "skills-plugin"),
-    // Office UI off — this harness tests the bot, not the read-only web page (ADR 0002).
-    officeUiPort: undefined,
+    // Off by default: the race tests below are about the bot, not the
+    // read-only web page (ADR 0002). The Office UI tests opt in per case.
+    officeUiPort: options.officeUiPort,
   };
   const bot = new Bot(config);
   // The bot's private surface is what the race lives in; the test drives it
@@ -124,6 +143,17 @@ async function harness(): Promise<Harness> {
       "function",
       `Bot.${name} was renamed — point this test at the new name before it spawns real sessions`,
     );
+  }
+  // Same trick for the Office UI wiring (ticket #19): renaming one of these
+  // would leave the checks below asserting against undefined instead of code.
+  for (const name of [
+    "buildHooks",
+    "officeSnapshot",
+    "openOfficeUi",
+    "startEngine",
+    "waitForBrowser",
+  ]) {
+    assert.equal(typeof proto[name], "function", `Bot.${name} was renamed — update this test`);
   }
 
   const intro = deferred();
@@ -232,7 +262,43 @@ async function harness(): Promise<Harness> {
       }) as Promise<void>,
     registered: () => registry().get(thread.id)?.session.state,
     registeredCount: () => registry().size,
+    snapshot: () => inner.officeSnapshot!() as OfficeSnapshot,
+    hooks: ({ threadId, persist }) =>
+      inner.buildHooks!({
+        reporter,
+        channel: thread,
+        record: {
+          threadId,
+          ownerId: MEMBER,
+          workspace: dir,
+          model: "sonnet",
+          createdAt: new Date().toISOString(),
+        },
+        persist,
+      }) as SessionHooks,
+    openOfficeUi: () => inner.openOfficeUi!() as Promise<void>,
+    officeUi: () => (bot as unknown as { officeUi?: OfficeServerHandle }).officeUi,
+    startEngine: () => inner.startEngine!() as Promise<void>,
+    countFeedWrites: () => {
+      const feed = (bot as unknown as { outcomeFeed: { record: (entry: unknown) => void } })
+        .outcomeFeed;
+      const original = feed.record.bind(feed);
+      let count = 0;
+      feed.record = (entry: unknown) => {
+        count += 1;
+        original(entry);
+      };
+      return () => count;
+    },
+    preapproveBrowser: (threadId: string) => {
+      (bot as unknown as { browserApproved: Set<string> }).browserApproved.add(threadId);
+    },
   };
+}
+
+/** A finished turn, as the SDK would report it. */
+function turn(status: TurnSummary["status"], errors?: string[]): TurnSummary {
+  return { status, durationMs: 1200, turns: 2, costUsd: 0, ...(errors ? { errors } : {}) };
 }
 
 console.log("`/task` racing a message in the same thread (issue #3)");
@@ -326,6 +392,155 @@ await check("a message during a slow hand-over lands on the new session", async 
   assert.deepEqual([...fresh.sent, ...fresh.steered].sort(), [PROMPT, FOLLOW_UP].sort());
   assert.equal(h.registered(), fresh);
   assert.equal(h.registeredCount(), 1);
+});
+
+console.log("\nOffice UI ต่อสายเข้าบอทจริง (ticket #19)");
+
+await check("/task แล้วห้องเห็นตัวละครทันที ตั้งแต่ slot ยังเป็น pending", async () => {
+  const h = await harness();
+  const task = h.runTask();
+  // Inside thread.send: the slot is reserved, the session does not exist yet —
+  // exactly the moment the room must already show someone walking in (spec §5.4).
+  await until(() => h.thread.sent.length === 1);
+  assert.equal(h.sessions.length, 0, "ยังไม่มี session — slot ยังเป็น pending");
+
+  const room = h.snapshot();
+  assert.equal(room.sessions.length, 1, "ตัวละครของเธรดโผล่ในห้องแล้ว");
+  const character = room.sessions[0]!;
+  assert.equal(character.id, h.thread.id);
+  assert.equal(character.kind, "task");
+  assert.equal(character.state, "working");
+  assert.equal(character.detail, "กำลังเข้ามา");
+
+  h.releaseIntro();
+  await task;
+});
+
+await check("turn ที่จบแบบ failed ทิ้ง entry ไว้ใน feed และตัวละครขึ้น state failed", async () => {
+  const h = await harness();
+  // A thread the register does not hold, so the ghost is what the room shows —
+  // a live character with the same id would win the assembler's dedupe.
+  const hooks = h.hooks({ threadId: "thread-ghost", persist: true });
+  await hooks.onTurnEnd(turn("failed", ["อ่านไฟล์ config ไม่ได้"]));
+
+  const ghosts = h.snapshot().outcomeFeed;
+  assert.equal(ghosts.length, 1, "ผีหนึ่งตัวใน feed");
+  assert.equal(ghosts[0]!.id, "thread-ghost");
+  assert.equal(ghosts[0]!.state, "failed");
+  assert.equal(ghosts[0]!.outcome?.status, "failed");
+  assert.equal(ghosts[0]!.outcome?.reason, "อ่านไฟล์ config ไม่ได้");
+
+  // …and a turn that went fine sends the ghost home again (spec §5.5).
+  await hooks.onTurnEnd(turn("ok"));
+  assert.deepEqual(h.snapshot().outcomeFeed, [], "ตัวเดิมกลับมาทำงานได้ ผีถูกล้างทิ้ง");
+});
+
+await check("session ที่ตายแบบ wasResuming ไม่ทิ้งอะไรไว้ใน feed", async () => {
+  const h = await harness();
+  const hooks = h.hooks({ threadId: "thread-resuming", persist: true });
+  // Recoverable by typing again, so it leaves the room quietly (spec §5.3).
+  await hooks.onFatal(new Error("บริบทเดิมหมดอายุ"), true);
+  assert.deepEqual(h.snapshot().outcomeFeed, [], "ไม่มีผีจากการตายแบบ resuming");
+
+  // The same death that is not a resume does leave one — otherwise this test
+  // would still pass with the feed write deleted entirely.
+  await hooks.onFatal(new Error("เซสชันพัง"), false);
+  const ghosts = h.snapshot().outcomeFeed;
+  assert.equal(ghosts.length, 1);
+  assert.equal(ghosts[0]!.id, "thread-resuming");
+  assert.equal(ghosts[0]!.state, "failed");
+});
+
+await check("/ask ไม่เป็นตัวละคร — hooks ที่ไม่ persist ไม่เขียน feed", async () => {
+  const h = await harness();
+  const hooks = h.hooks({ threadId: "ask:interaction-9", persist: false });
+  await hooks.onTurnEnd(turn("failed", ["พัง"]));
+  await hooks.onFatal(new Error("พังอีก"), false);
+  assert.deepEqual(h.snapshot().outcomeFeed, [], "/ask ไม่มี identity ในห้อง (spec §1.1)");
+});
+
+await check("ไม่ตั้ง OFFICE_UI_PORT → ไม่มี server ไม่มี timer เพิ่มสักตัว", async () => {
+  const h = await harness();
+  const owned = (): number =>
+    process
+      .getActiveResourcesInfo()
+      .filter((kind) => kind === "Timeout" || kind === "TCPSERVERWRAP").length;
+  const before = owned();
+  await h.openOfficeUi();
+  assert.equal(h.officeUi(), undefined, "ไม่มี handle");
+  assert.equal(owned(), before, "ไม่มี timer และไม่มี server socket เพิ่มขึ้นมา");
+});
+
+await check("ปิดบอทแล้ว handle ของ Office UI ถูกปิดด้วย", async () => {
+  // Port 0 = let the OS pick, so a busy port on the dev machine cannot make
+  // this flaky (the same trick src/office/server.test.ts uses).
+  const h = await harness({ officeUiPort: 0 });
+  await h.openOfficeUi();
+  const handle = h.officeUi();
+  assert.ok(handle, "server ต้องเปิดขึ้นเมื่อมี OFFICE_UI_PORT");
+  const live = await fetch(`http://127.0.0.1:${handle.port}/state`);
+  assert.equal(live.status, 200, "หน้าเว็บเสิร์ฟ snapshot ของบอทจริงอยู่");
+  assert.equal(((await live.json()) as OfficeSnapshot).v, 1);
+
+  await h.bot.shutdown();
+  assert.equal(h.officeUi(), undefined, "handle ถูกปล่อยแล้ว");
+  await assert.rejects(
+    fetch(`http://127.0.0.1:${handle.port}/state`),
+    "พอร์ตต้องปิดจริง ไม่ใช่แค่ลืม handle",
+  );
+});
+
+await check("server เปิดไม่ขึ้น → บอทยังเข้า Discord และรับงานได้ตามปกติ", async () => {
+  const blocker = createServer(() => undefined);
+  await new Promise<void>((ready) => blocker.listen(0, "127.0.0.1", ready));
+  const taken = (blocker.address() as AddressInfo).port;
+
+  const h = await harness({ officeUiPort: taken });
+  // startEngine() is the whole post-login path — it must not throw here.
+  await h.startEngine();
+  assert.equal(h.officeUi(), undefined, "fail-soft: ไม่มีหน้าเว็บ แต่ไม่ล้ม");
+
+  h.releaseIntro();
+  await h.runTask();
+  assert.equal(h.sessions.length, 1, "บอทยังรับ /task ได้ตามปกติ");
+
+  await h.bot.shutdown();
+  await new Promise<void>((done) => blocker.close(() => done()));
+});
+
+await check("เส้นทางร้อนเดิมไม่แตะ outcome feed (decide / waitForBrowser / onApprovalNeeded)", async () => {
+  const h = await harness();
+  const writes = h.countFeedWrites();
+  const hooks = h.hooks({ threadId: h.thread.id, persist: true });
+  const { signal } = new AbortController();
+
+  const read = await hooks.decide("Read", { file_path: join(tmpdir(), "x.md") }, { signal });
+  assert.equal(read.action, "allow", "tool อ่านล้วนผ่านฉลุยเหมือนเดิม");
+
+  // A browser call that already has its once-per-Task Approval goes through
+  // waitForBrowser — the queue is empty, so it gets the browser straight away.
+  h.preapproveBrowser(h.thread.id);
+  const browser = await hooks.decide("mcp__browser__browser_navigate", { url: "https://x" }, { signal });
+  assert.equal(browser.action, "allow", "ได้คิว browser ทันทีเมื่อไม่มีใครถือ");
+  assert.equal(h.snapshot().browserQueue.holder, h.thread.id);
+
+  assert.equal(writes(), 0, "ไม่มีการเขียน feed จากเส้นทางร้อนเลยสักครั้ง");
+
+  // Belt and braces: the two paths the behaviour above cannot drive without a
+  // real Discord approval button must not have gained an await into the feed.
+  const proto = Object.getPrototypeOf(h.bot) as Record<string, () => string>;
+  const built = proto.buildHooks!.toString();
+  const beforeTurnEnd = built.slice(0, built.indexOf("onTurnEnd:"));
+  assert.ok(
+    beforeTurnEnd.includes("decide:") && beforeTurnEnd.includes("onApprovalNeeded:"),
+    "ทั้งสองเส้นทางอยู่เหนือ onTurnEnd จริง — ไม่งั้นการตัดข้างล่างนี้ไม่ได้ตรวจอะไรเลย",
+  );
+  for (const source of [beforeTurnEnd, proto.waitForBrowser!.toString()]) {
+    assert.ok(
+      !/outcomeFeed|recordTaskOutcome|recordRunOutcome|officeSnapshot/.test(source),
+      "เส้นทางร้อนต้องไม่มีโค้ดของ Office UI แทรกอยู่",
+    );
+  }
 });
 
 if (failures > 0) {
