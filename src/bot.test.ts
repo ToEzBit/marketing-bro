@@ -87,7 +87,8 @@ type Harness = {
   releaseIntro: () => void;
   runTask: () => Promise<void>;
   deliver: (content: string) => Promise<void>;
-  stop: () => Promise<void>;
+  /** Runs `/stop` and returns what the thread was told — the wording is the assertion. */
+  stop: () => Promise<string>;
   /** The session the register holds for the thread, if any. */
   registered: () => FakeSession | undefined;
   registeredCount: () => number;
@@ -280,12 +281,17 @@ async function harness(options: { officeUiPort?: number } = {}): Promise<Harness
         channel: thread,
         react: async () => undefined,
       }) as Promise<void>,
-    stop: () =>
-      inner.onStop!({
+    stop: async () => {
+      let said = "";
+      await (inner.onStop!({
         user: { id: MEMBER },
         channel: thread,
-        reply: async () => undefined,
-      }) as Promise<void>,
+        reply: async (payload: string | { content: string }) => {
+          said = typeof payload === "string" ? payload : payload.content;
+        },
+      }) as Promise<void>);
+      return said;
+    },
     registered: () => registry().get(thread.id)?.session.state,
     registeredCount: () => registry().size,
     snapshot: () => inner.officeSnapshot!() as OfficeSnapshot,
@@ -394,6 +400,32 @@ await check("a message arriving while /task is posting joins that task's session
 
   // Nothing escaped the register: /stop reaches the session holding the subprocess.
   await h.stop();
+  assert.equal(session.interrupted, true);
+});
+
+await check("/stop says what it actually stopped, and brakes either way", async () => {
+  const h = await harness();
+  h.releaseIntro();
+  await h.runTask();
+  const session = h.sessions[0]!;
+
+  // Nothing running: the reply must not claim a turn was stopped — that wording
+  // with an idle character in the Office UI is what read as a bug in the room.
+  session.isBusy = false;
+  const idleReply = await h.stop();
+  assert.match(idleReply, /ไม่มีเทิร์นที่กำลังทำอยู่/);
+  assert.doesNotMatch(idleReply, /สั่งหยุดงาน/);
+  assert.equal(
+    session.interrupted,
+    true,
+    "the brake is still sent — isBusy can be stale, so it must never disarm /stop",
+  );
+
+  // A turn really running: the plain confirmation.
+  session.interrupted = false;
+  session.isBusy = true;
+  const busyReply = await h.stop();
+  assert.match(busyReply, /สั่งหยุดงาน/);
   assert.equal(session.interrupted, true);
 });
 
