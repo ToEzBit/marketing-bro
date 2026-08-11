@@ -23,6 +23,14 @@ const ROLE_META = {
   waiter: { icon: "⏳", color: "#8b6cff" },
 };
 
+/** กว้างสูงสุด (px) ของป้ายชื่อตัวละครบนจอ — เผื่อกันป้ายทับกันเองตอนที่นั่งชิดกัน (ดู clipTextToWidth)
+ *  108px ≈ ระยะห่างจริงระหว่างที่นั่ง 2 คอลัมน์ของ lounge/desks (โซนที่คนน่าจะอยู่พร้อมกันเยอะสุด) —
+ *  โซนที่ชิดกว่านี้ (stopped/bug 3 คอลัมน์, คิว Browser) จะยังมีป้ายเบียดกันบ้างตอนเต็มทุกที่พร้อมกัน
+ *  (เคสสุดขั้วเกินขนาดที่ระบบออกแบบไว้ ~10 ตัวละคร — ดูหมายเหตุใน commit) */
+const CHARACTER_LABEL_MAX_WIDTH = 108;
+/** ป้ายชื่อผู้ถือ Browser ที่โต๊ะ (บรรทัดเดียว ยาวกว่าปกติเพราะมีคำนำ/ต่อท้าย) กว้างได้เกือบเต็มโซน */
+const BROWSER_HOLDER_LABEL_MAX_WIDTH = 176;
+
 function pad2(n) {
   return String(n).padStart(2, "0");
 }
@@ -346,7 +354,24 @@ export function createRenderer({ canvas, zones, assets }) {
     ctx.drawImage(img, sx, sy, fw, fh, -fw / 2, -(manifest.character.anchor?.[1] ?? fh - 2), fw, fh);
   }
 
-  /** วาดป้ายเดี่ยว (ใช้ทั้งป้ายโซนและป้ายตัวละคร) — แผ่นรองสีทึบกันโดนบัง (spec §7.2 บั๊กที่เจอใน prototype) */
+  /**
+   * ตัด text ด้วย "…" ให้พอดี maxWidth px จริง (วัดด้วย ctx.measureText ของ font ที่ตั้งไว้แล้ว)
+   * นี่คือคนละชั้นกับ truncateName() ~24 ตัวอักษรใน state.js (ซึ่งยังเป็นค่าที่ใช้จริงในการ์ดข้อมูล/
+   * meta.label เต็ม) — ชั้นนี้แค่บีบเฉพาะ "ป้ายบนจอ" เพิ่มอีกทีเมื่อที่นั่งชิดกันจนป้าย 24 ตัวอักษรจะทับ
+   * ป้ายข้างเคียง (บั๊กที่เจอตอนทดสอบด้วย snapshot ที่เต็มทุกโซนพร้อมกัน — ป้ายในโซน grid 3 คอลัมน์
+   * อย่าง stopped/bug และคิว Browser ชิดกันมากพอที่ป้าย 24 ตัวอักษรจะทับกันเอง)
+   */
+  function clipTextToWidth(ctx, text, maxWidth) {
+    if (!maxWidth || ctx.measureText(text).width <= maxWidth) return text;
+    let clipped = text;
+    while (clipped.length > 0 && ctx.measureText(clipped + "…").width > maxWidth) {
+      clipped = clipped.slice(0, -1);
+    }
+    return clipped.length > 0 ? clipped + "…" : "…";
+  }
+
+  /** วาดป้ายเดี่ยว (ใช้ทั้งป้ายโซนและป้ายตัวละคร) — แผ่นรองสีทึบกันโดนบัง (spec §7.2 บั๊กที่เจอใน prototype)
+   *  แต่ละบรรทัดตั้ง `maxWidth` (px) ได้เพื่อกันป้ายชนกันเองตอนที่นั่งชิดกัน (ดู clipTextToWidth ข้างบน) */
   function drawLabelPlate(cx, y, lines, opts = {}) {
     const { bold = false, sub = false, fg = "rgba(255,255,255,.92)", bg = "rgba(0,0,0,.6)" } = opts;
     ctx.textAlign = "center";
@@ -354,12 +379,13 @@ export function createRenderer({ canvas, zones, assets }) {
     for (const line of lines) {
       if (!line.text) continue;
       ctx.font = line.font || (bold ? "bold 12px sans-serif" : sub ? "10px sans-serif" : "600 11px sans-serif");
-      const tw = ctx.measureText(line.text).width;
+      const text = clipTextToWidth(ctx, line.text, line.maxWidth);
+      const tw = ctx.measureText(text).width;
       ctx.fillStyle = line.bg || bg;
       roundRectPath(ctx, cx - tw / 2 - 5, cursorY - 12, tw + 10, 15, 5);
       ctx.fill();
       ctx.fillStyle = line.fg || fg;
-      ctx.fillText(line.text, cx, cursorY);
+      ctx.fillText(text, cx, cursorY);
       cursorY += 14;
     }
     return cursorY;
@@ -403,7 +429,12 @@ export function createRenderer({ canvas, zones, assets }) {
     const cy = slot.y * TILE;
     if (holderMeta.zone === "browser") return; // อยู่ที่โต๊ะอยู่แล้ว ป้ายตัวละครพอ ไม่ต้องซ้ำ
     drawLabelPlate(cx, cy + 30, [
-      { text: `🌐 ${holderMeta.label} (ถือ Browser)`, font: "bold 10px sans-serif", bg: "rgba(139,108,255,.55)" },
+      {
+        text: `🌐 ${holderMeta.label} (ถือ Browser)`,
+        font: "bold 10px sans-serif",
+        bg: "rgba(139,108,255,.55)",
+        maxWidth: BROWSER_HOLDER_LABEL_MAX_WIDTH,
+      },
     ]);
   }
 
@@ -482,8 +513,19 @@ export function createRenderer({ canvas, zones, assets }) {
       const clockGlyph = clock.countdown ? "⏳" : "⏱";
       ctx.globalAlpha = item.alpha;
       drawLabelPlate(item.x, item.y + 16, [
-        { text: `${item.meta.label}  ${clockGlyph}${clock.text}`, font: "600 10px sans-serif" },
-        item.meta.headline ? { text: item.meta.headline, font: "9px sans-serif", fg: "rgba(255,255,255,.75)" } : null,
+        {
+          text: `${item.meta.label}  ${clockGlyph}${clock.text}`,
+          font: "600 10px sans-serif",
+          maxWidth: CHARACTER_LABEL_MAX_WIDTH,
+        },
+        item.meta.headline
+          ? {
+              text: item.meta.headline,
+              font: "9px sans-serif",
+              fg: "rgba(255,255,255,.75)",
+              maxWidth: CHARACTER_LABEL_MAX_WIDTH,
+            }
+          : null,
       ].filter(Boolean));
       ctx.globalAlpha = 1;
     }
