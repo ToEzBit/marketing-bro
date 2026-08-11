@@ -23,7 +23,8 @@ const TICK_INTERVAL_MS = 30_000;
 
 export class Scheduler {
   private timer: NodeJS.Timeout | undefined;
-  private readonly running = new Set<string>();
+  /** The rounds in flight, each with the time it started. */
+  private readonly running = new Map<string, number>();
 
   constructor(
     private readonly store: ScheduleStore,
@@ -55,6 +56,16 @@ export class Scheduler {
 
   isRunning(id: string): boolean {
     return this.running.has(id);
+  }
+
+  /** The schedules with a round in flight right now. */
+  runningIds(): string[] {
+    return [...this.running.keys()];
+  }
+
+  /** When this schedule's round started, or undefined when none is running. */
+  runningSince(id: string): number | undefined {
+    return this.running.get(id);
   }
 
   /** Fires every due schedule. Runs detach so one slow Run can't delay the rest. */
@@ -112,7 +123,7 @@ export class Scheduler {
   }
 
   private async execute(record: ScheduleRecord): Promise<void> {
-    this.running.add(record.id);
+    this.running.set(record.id, this.now().getTime());
     record.lastFiredAt = this.now().toISOString();
     await this.persist(record);
 

@@ -26,11 +26,18 @@ export type RegistryHooks<T> = {
   retire: (entry: T, threadId: string) => Promise<void> | void;
 };
 
+/**
+ * When this thread's slot was taken. Carried over unchanged when the slot goes
+ * live, so whoever watches the register sees one arrival, not two: the moment
+ * someone asked for a session, not the moment building it happened to finish.
+ */
+type Reserved = { since: number };
+
 type Slot<T> =
   /** Built and usable. */
-  | { state: "live"; entry: T }
+  | ({ state: "live"; entry: T } & Reserved)
   /** Reserved: being built (or handed over) right now; `ready` is the result. */
-  | { state: "pending"; ready: Promise<T> };
+  | ({ state: "pending"; ready: Promise<T> } & Reserved);
 
 export class SessionRegistry<T> {
   private readonly slots = new Map<string, Slot<T>>();
@@ -59,6 +66,22 @@ export class SessionRegistry<T> {
       if (slot.state === "live") entries.push(slot.entry);
     }
     return entries;
+  }
+
+  /**
+   * Every slot, the ones still being built included — unlike {@link values},
+   * which only knows about sessions that finished building. A read-only view
+   * for whoever draws what the bot is doing right now (Office UI): a thread
+   * someone just typed in has to show up immediately, before Discord has been
+   * touched, or the room lags behind the person watching it.
+   */
+  entries(): { threadId: string; state: "live" | "pending"; entry?: T; since: number }[] {
+    return [...this.slots].map(([threadId, slot]) => ({
+      threadId,
+      state: slot.state,
+      since: slot.since,
+      ...(slot.state === "live" ? { entry: slot.entry } : {}),
+    }));
   }
 
   /**
@@ -165,13 +188,14 @@ export class SessionRegistry<T> {
       settle = { resolve, reject };
     });
     // Nothing has awaited yet: from here on, this thread has an owner.
-    this.slots.set(threadId, { state: "pending", ready });
+    const since = Date.now();
+    this.slots.set(threadId, { state: "pending", ready, since });
 
     void (async () => {
       try {
         if (previous !== undefined) await this.retire(threadId, previous);
         const entry = await factory();
-        this.slots.set(threadId, { state: "live", entry });
+        this.slots.set(threadId, { state: "live", entry, since });
         settle.resolve(entry);
       } catch (error) {
         // Building failed. A slot left reserved would wedge the thread for

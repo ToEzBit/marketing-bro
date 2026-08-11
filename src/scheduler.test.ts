@@ -402,6 +402,36 @@ await check("a legacy record's baked-in skill is split back out on load", async 
   assert.match(sent, /หาเทรนด์ TikTok/);
 });
 
+// ------------------------------------------------- the rounds in flight now
+
+await check("runningIds and runningSince match the round that is actually running", async () => {
+  const h = await harness();
+  h.setOutcome("hang");
+  assert.deepEqual(h.scheduler.runningIds(), [], "nothing has fired yet");
+  assert.equal(h.scheduler.runningSince(h.record.id), undefined);
+
+  const firedAt = new Date(T0.getTime() + 30 * MIN);
+  h.setNow(firedAt);
+  await h.scheduler.tick();
+  await until(() => h.runs.length === 1);
+
+  assert.deepEqual(h.scheduler.runningIds(), [h.record.id]);
+  assert.equal(h.scheduler.runningSince(h.record.id), firedAt.getTime());
+  assert.equal(h.scheduler.isRunning(h.record.id), true, "the old answer is unchanged");
+  assert.equal(h.scheduler.runningSince("nope"), undefined);
+});
+
+await check("a round that finished is out of runningIds again", async () => {
+  const h = await harness();
+  h.setNow(new Date(T0.getTime() + 30 * MIN));
+  await h.scheduler.tick();
+  await until(() => h.runs.length === 1);
+  await until(() => !h.scheduler.isRunning(h.record.id));
+
+  assert.deepEqual(h.scheduler.runningIds(), []);
+  assert.equal(h.scheduler.runningSince(h.record.id), undefined);
+});
+
 if (failures > 0) {
   console.error(`\n${failures} failing`);
   process.exit(1);

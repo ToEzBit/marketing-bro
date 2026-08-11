@@ -97,6 +97,27 @@ export class ThreadReporter {
     private readonly onStatusMessage?: StatusMessageHook,
   ) {}
 
+  /** The name of the thread (or channel) this reporter posts into. */
+  get threadName(): string {
+    return this.thread.name;
+  }
+
+  /** Deep link to that thread, when the channel knows which guild it is in. */
+  get threadUrl(): string | undefined {
+    const guildId = this.thread.guildId;
+    return guildId ? `https://discord.com/channels/${guildId}/${this.thread.id}` : undefined;
+  }
+
+  /**
+   * The headline last handed to {@link setHeadline} ("" when there is none).
+   * Something to *show*, never something to decide state by: it is overwritten
+   * with "กำลังคิด" the moment an approval is answered, so a session waiting on
+   * a human and one thinking are indistinguishable through this.
+   */
+  get currentHeadline(): string {
+    return this.headline;
+  }
+
   /** Queues work on the send chain; failures are logged, never thrown at callers. */
   private enqueue(work: () => Promise<unknown>): Promise<void> {
     this.tail = this.tail.then(work).catch((error: unknown) => {
