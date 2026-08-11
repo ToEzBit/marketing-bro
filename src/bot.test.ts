@@ -20,6 +20,8 @@ import type { SessionHooks, TurnSummary } from "./agent-session.js";
 import { Bot } from "./bot.js";
 import type { Config } from "./config.js";
 import type { OfficeServerHandle, OfficeSnapshot } from "./office/types.js";
+import type { ScheduleRecord } from "./schedule-store.js";
+import type { RunOutcome } from "./scheduler.js";
 
 let failures = 0;
 
@@ -101,8 +103,14 @@ type Harness = {
   startEngine: () => Promise<void>;
   /** Counts writes to the outcome feed from the moment it is called. */
   countFeedWrites: () => () => number;
+  /** Counts Discord channel fetches — the snapshot must never make one. */
+  countChannelFetches: () => () => number;
   /** Pretends a Task already got its once-per-Task browser Approval (ADR 0003). */
   preapproveBrowser: (threadId: string) => void;
+  /** Makes every schedule thread lookup fail, the way a deleted channel does. */
+  loseScheduleThreads: () => void;
+  /** One round of a schedule, driven through the bot's own code. */
+  runScheduled: (record: ScheduleRecord) => Promise<RunOutcome>;
 };
 
 async function harness(options: { officeUiPort?: number } = {}): Promise<Harness> {
@@ -148,8 +156,11 @@ async function harness(options: { officeUiPort?: number } = {}): Promise<Harness
   // would leave the checks below asserting against undefined instead of code.
   for (const name of [
     "buildHooks",
+    "describeThread",
+    "fetchScheduleThread",
     "officeSnapshot",
     "openOfficeUi",
+    "runScheduledOnce",
     "startEngine",
     "waitForBrowser",
   ]) {
@@ -177,6 +188,10 @@ async function harness(options: { officeUiPort?: number } = {}): Promise<Harness
     addActivity: () => undefined,
     setHeadline: () => undefined,
     attach: async () => undefined,
+    // The read-only side the Office UI snapshot reads off a reporter (spec §6.5).
+    threadName: "เธรดทดสอบ",
+    threadUrl: undefined,
+    currentHeadline: "",
   };
   inner.createSession = (_thread: unknown, record: unknown) => {
     const state: FakeSession = {
@@ -198,6 +213,17 @@ async function harness(options: { officeUiPort?: number } = {}): Promise<Harness
       get idleForMs() {
         return state.idleForMs;
       },
+      // The read-only getters the Office UI snapshot reads off a session
+      // (spec §6.2). Which zone each combination lands in is
+      // src/office/snapshot.test.ts's job, not this file's.
+      get isStopping() {
+        return state.isBusy && state.interrupted;
+      },
+      get isClosed() {
+        return state.closed;
+      },
+      startedAt: Date.now(),
+      pendingApprovals: [],
       send: async (text: string) => {
         if (state.isBusy) {
           state.steered.push(text);
@@ -290,9 +316,47 @@ async function harness(options: { officeUiPort?: number } = {}): Promise<Harness
       };
       return () => count;
     },
+    countChannelFetches: () => {
+      const channels = (bot as unknown as { client: { channels: { fetch: unknown } } }).client
+        .channels;
+      let count = 0;
+      channels.fetch = async () => {
+        count += 1;
+        return null;
+      };
+      return () => count;
+    },
     preapproveBrowser: (threadId: string) => {
       (bot as unknown as { browserApproved: Set<string> }).browserApproved.add(threadId);
     },
+    loseScheduleThreads: () => {
+      // Stubbed rather than left to discord.js: with no gateway there is no
+      // thread to find anyway, and a real REST attempt would only be slower.
+      inner.fetchScheduleThread = async () => {
+        throw new Error("both its thread and its channel are gone");
+      };
+    },
+    runScheduled: (record: ScheduleRecord) =>
+      inner.runScheduledOnce!(record) as Promise<RunOutcome>,
+  };
+}
+
+/** A schedule as the store would hold it. */
+function schedule(id: string): ScheduleRecord {
+  return {
+    id,
+    ownerId: MEMBER,
+    channelId: "channel-1",
+    threadId: `thread-of-${id}`,
+    prompt: "สรุปยอดขายรายวัน",
+    workspace: tmpdir(),
+    model: "sonnet",
+    recurrence: { kind: "clock", hour: 9, minute: 0, everyDays: 1 },
+    browserGrant: false,
+    paused: false,
+    consecutiveFailures: 0,
+    createdAt: new Date().toISOString(),
+    nextRunAt: new Date(Date.now() + 3_600_000).toISOString(),
   };
 }
 
@@ -457,6 +521,40 @@ await check("/ask ไม่เป็นตัวละคร — hooks ที่
   await hooks.onTurnEnd(turn("failed", ["พัง"]));
   await hooks.onFatal(new Error("พังอีก"), false);
   assert.deepEqual(h.snapshot().outcomeFeed, [], "/ask ไม่มี identity ในห้อง (spec §1.1)");
+});
+
+await check("Run ที่หาเธรดไม่เจอ ลง feed ด้วยคีย์ schedule:<id> ไม่ใช่ id เปล่า", async () => {
+  const h = await harness();
+  h.loseScheduleThreads();
+  const record = schedule("a1c9");
+
+  assert.equal(await h.runScheduled(record), "failure");
+
+  const ghosts = h.snapshot().outcomeFeed;
+  assert.equal(ghosts.length, 1, "รอบที่ไม่มีเธรดให้โพสต์ เห็นได้ที่ห้องนี้ที่เดียว");
+  // The load-bearing assertion: a bare schedule id here would not match the
+  // live Run's character key, and the assembler's dedupe would quietly stop
+  // working — a ghost standing next to the round that is still going.
+  assert.equal(ghosts[0]!.id, "schedule:a1c9");
+  assert.equal(ghosts[0]!.kind, "run");
+  assert.equal(ghosts[0]!.state, "failed");
+  assert.equal(ghosts[0]!.outcome?.reason, "หาเธรดของ schedule ไม่เจอ");
+  assert.equal(ghosts[0]!.threadId, record.threadId);
+});
+
+await check("officeSnapshot อ่านชื่อเธรดจาก cache เท่านั้น ไม่เคย fetch", async () => {
+  const h = await harness();
+  const fetches = h.countChannelFetches();
+  h.releaseIntro();
+  await h.runTask();
+  h.loseScheduleThreads();
+  await h.runScheduled(schedule("b2d0"));
+
+  // Called once a second by the server, so a fetch in here would mean a Discord
+  // REST call every second for as long as a page is open (spec §6.6).
+  h.snapshot();
+  h.snapshot();
+  assert.equal(fetches(), 0, "ไม่มี fetch สักครั้งจากการประกอบ snapshot");
 });
 
 await check("ไม่ตั้ง OFFICE_UI_PORT → ไม่มี server ไม่มี timer เพิ่มสักตัว", async () => {
