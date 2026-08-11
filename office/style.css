@@ -97,6 +97,12 @@ canvas#room {
   justify-content: center;
   backdrop-filter: blur(1px);
 }
+/* [hidden] เฉย ๆ แพ้ specificity ของ .disconnected-overlay{display:flex} ข้างบน (author stylesheet
+   ชนะ UA default เสมอที่ specificity เท่ากัน) ทำให้ el.hidden=true จาก main.js ไม่ทำงานจริง ต้องบังคับ
+   display:none ทับเองตรงนี้ */
+.disconnected-overlay[hidden] {
+  display: none;
+}
 .disconnected-box {
   text-align: center;
   color: #fff;
