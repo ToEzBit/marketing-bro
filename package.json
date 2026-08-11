@@ -12,7 +12,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "doctor": "tsx src/doctor.ts",
-    "test": "tsx src/policy.test.ts && tsx src/browser-queue.test.ts && tsx src/session-registry.test.ts && tsx src/recurrence.test.ts && tsx src/scheduler.test.ts && tsx src/skills.test.ts && tsx src/store.test.ts && tsx src/agent-session.test.ts && tsx src/bot.test.ts && tsx src/orphan-sweep.test.ts && tsx src/discord/render.test.ts && tsx src/status-reconcile.test.ts",
+    "test": "tsx src/policy.test.ts && tsx src/browser-queue.test.ts && tsx src/session-registry.test.ts && tsx src/recurrence.test.ts && tsx src/scheduler.test.ts && tsx src/skills.test.ts && tsx src/store.test.ts && tsx src/agent-session.test.ts && tsx src/bot.test.ts && tsx src/orphan-sweep.test.ts && tsx src/discord/render.test.ts && tsx src/status-reconcile.test.ts && tsx src/office/feed.test.ts",
     "whoami": "tsx src/whoami.ts",
     "browser:login": "tsx src/browser-login.ts",
     "workspace:init": "tsx src/setup-workspace.ts",
