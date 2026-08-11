@@ -580,7 +580,17 @@ export class Bot {
       });
       return;
     }
-    await interaction.reply(`🛑 <@${interaction.user.id}> สั่งหยุดงาน`);
+    // The brake is sent either way — `interrupt()` is deliberately not guarded by
+    // `isBusy` (see AgentSession.interrupt) so a stale flag can never disarm it.
+    // Only the wording changes: replying "สั่งหยุดงาน" with nothing running reads
+    // as "a turn was stopped", and the Office UI then shows an idle character,
+    // which is what made this look like a bug in the room rather than in here.
+    const running = live.session.isBusy;
+    await interaction.reply(
+      running
+        ? `🛑 <@${interaction.user.id}> สั่งหยุดงาน`
+        : `🛑 <@${interaction.user.id}> สั่งหยุด — ตอนนี้ไม่มีเทิร์นที่กำลังทำอยู่ (เธรดยังเปิดค้างอยู่ พิมพ์ต่อได้เลย)`,
+    );
     await live.session.interrupt();
   }
 
