@@ -4,12 +4,25 @@
 // รับ drawList จาก state.js (ตำแหน่งคำนวณแล้ว) แล้ววาดเป็นชั้น ๆ ตามลำดับที่ spec §7.2 บังคับ:
 //   พื้น/เฟอร์นิเจอร์ → ตัวละคร (เรียงตาม y) → ป้ายชื่อโซน+ตัวละคร (pass สุดท้ายเสมอ กันตัวละครบัง)
 //
-// โหมด asset: ถ้า assets.mode === "sprites" ใช้ drawImage จาก manifest จริง
-// ถ้าไม่ใช่ (placeholder) วาดตัวละครเป็นรูปทรงเรขาคณิตในกรอบ 64x64/tile 32px เดิมเป๊ะ
+// โหมด asset: ถ้า assets.mode === "sprites" ใช้ drawImage จาก manifest จริง (ห้อง = tileset + map.json,
+// ตัวละคร = ชีตจริง) ถ้าไม่ใช่ (placeholder) วาดห้องเป็นสี่เหลี่ยมโซน + เฟอร์นิเจอร์เวกเตอร์ และวาด
+// ตัวละครเป็นรูปทรงเรขาคณิตในกรอบ 64x64/tile 32px เดิมเป๊ะ — สองโหมดนี้ต้องใช้งานได้เท่ากันทุกฟีเจอร์
+//
+// **ห้าม assume ขนาดใด ๆ** (spec §8.2): px ต่อ tile มาจาก assets.tilePx, ขนาดห้องมาจาก map.json,
+// เฟรม/แถว/จุด anchor ของตัวละครมาจาก manifest — ค่าคงที่ TILE ใช้เป็นแค่ "หน่วยอ้างอิง" ของรูปทรง
+// เวกเตอร์ที่วาดด้วยมือ (ดู UNIT ข้างล่าง) เท่านั้น
 
 "use strict";
 
-import { TILE, ZONE_IDS, pickCharacterFolder } from "./layout.js";
+import {
+  TILE,
+  ROOM,
+  ZONE_IDS,
+  DEFAULT_DIRECTIONS,
+  pickCharacterFolder,
+  tileLayersOf,
+  animationFrameIndex,
+} from "./layout.js";
 
 const STATE_META = {
   idle: { label: "ว่าง", icon: "💤", color: "#5aa9e6" },
@@ -23,16 +36,27 @@ const ROLE_META = {
   waiter: { icon: "⏳", color: "#8b6cff" },
 };
 
-/** กว้างสูงสุด (px) ของป้ายชื่อตัวละครบนจอ — เผื่อกันป้ายทับกันเองตอนที่นั่งชิดกัน (ดู clipTextToWidth)
- *  108px ≈ ระยะห่างจริงระหว่างที่นั่ง 2 คอลัมน์ของ lounge/desks (โซนที่คนน่าจะอยู่พร้อมกันเยอะสุด) —
- *  โซนที่ชิดกว่านี้ (stopped/bug 3 คอลัมน์, คิว Browser) จะยังมีป้ายเบียดกันบ้างตอนเต็มทุกที่พร้อมกัน
- *  (เคสสุดขั้วเกินขนาดที่ระบบออกแบบไว้ ~10 ตัวละคร — ดูหมายเหตุใน commit) */
+/** กว้างสูงสุด (px) ของป้ายชื่อตัวละครบนจอ — 108px ≈ ระยะห่างจริงระหว่างที่นั่ง 2 คอลัมน์ของ lounge/desks
+ *  นี่เป็นแค่ "เพดานความกว้าง" ไม่ใช่กลไกกันป้ายทับกันแล้ว: โซน grid 3 คอลัมน์ (stopped/bug ห่างกัน
+ *  ~54px) และคิว Browser (~58px) แคบเกินกว่าที่การตัดข้อความจะช่วยได้ เพราะลำพังนาฬิกาท้ายป้ายก็กิน
+ *  เกินระยะนั้นแล้ว — ตัวที่กันทับจริงคือ pass จัดวางที่ดันป้ายที่ชนกันลงทีละแถว (ดู drawCharacterLabels) */
 const CHARACTER_LABEL_MAX_WIDTH = 108;
 /** ป้ายชื่อผู้ถือ Browser ที่โต๊ะ (บรรทัดเดียว ยาวกว่าปกติเพราะมีคำนำ/ต่อท้าย) กว้างได้เกือบเต็มโซน */
 const BROWSER_HOLDER_LABEL_MAX_WIDTH = 176;
 /** งบ (px) ขั้นต่ำที่ต้องเหลือให้ตัวข้อความหลักเสมอ แม้ `suffix` จะกว้างผิดคาด — กัน budget เหลือ 0
  *  แล้ว clipTextToWidth มองว่า "ไม่จำกัด" (`!maxWidth`) ซึ่งจะทำให้ป้ายกลับไปทับกันเองอีก */
 const MIN_LABEL_TEXT_WIDTH = 24;
+/** ระยะบรรทัดในป้ายหลายบรรทัด + ความสูงแผ่นรองต่อบรรทัด (px) */
+const LABEL_LINE_H = 14;
+const LABEL_PLATE_H = 15;
+const LABEL_PLATE_PAD_X = 5;
+/** ป้ายที่ชนของเดิมถูกดันลงทีละ 1 แถว ไม่เกิน N ครั้ง (เกินกว่านั้นยอมให้ทับ ดีกว่าดันจนหลุดโซน) */
+const LABEL_PUSH_STEP = 15;
+const LABEL_MAX_PUSH = 6;
+/** ช่องว่างขั้นต่ำระหว่างแผ่นป้ายสองอัน ก่อนจะถือว่า "ชน" */
+const LABEL_GAP = 2;
+/** ชื่อท่าเดินใน manifest.character.animations — ท่าเดียวที่เล่นเป็นอนิเมชัน (spec §8.2 ตั้งชื่อไว้แบบนี้) */
+const WALK_ANIM = "walk";
 
 function pad2(n) {
   return String(n).padStart(2, "0");
@@ -78,14 +102,41 @@ function roundRectPath(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-function tileRect([x, y, w, h]) {
-  return [x * TILE, y * TILE, w * TILE, h * TILE];
+/** กรอบสี่เหลี่ยมสองอันชนกันไหม (เผื่อช่องว่าง LABEL_GAP) */
+function boxesOverlap(a, b) {
+  return (
+    a.x1 - LABEL_GAP < b.x2 && a.x2 + LABEL_GAP > b.x1 && a.y1 - LABEL_GAP < b.y2 && a.y2 + LABEL_GAP > b.y1
+  );
 }
 
-export function createRenderer({ canvas, zones, assets }) {
+/**
+ * @param {{canvas:HTMLCanvasElement, zones:object, assets:object,
+ *          roomSize?:{cols:number,rows:number}}} args
+ *   `assets.tilePx` = px ต่อ tile จริง, `roomSize` = ขนาดห้องจาก map.json (ค่าเริ่มต้น 32x16)
+ */
+export function createRenderer({ canvas, zones, assets, roomSize }) {
   const ctx = canvas.getContext("2d");
-  const W = 32 * TILE;
-  const H = 16 * TILE;
+  /** px ต่อ tile ที่ใช้จริงทั้งไฟล์นี้ — มาจาก manifest (tileSize x scale) ไม่ใช่ค่าคงที่ 32 */
+  const tilePx = assets.tilePx > 0 ? assets.tilePx : TILE;
+  const cols = roomSize?.cols > 0 ? roomSize.cols : ROOM.cols;
+  const rows = roomSize?.rows > 0 ? roomSize.rows : ROOM.rows;
+  /** ตัวคูณของรูปทรงเวกเตอร์ที่เขียนด้วยตัวเลข px สมัย tile 32px (เฟอร์นิเจอร์/dais/สปอตไลต์) */
+  const UNIT = tilePx / TILE;
+  const W = cols * tilePx;
+  const H = rows * tilePx;
+
+  function tileRect([x, y, w, h]) {
+    return [x * tilePx, y * tilePx, w * tilePx, h * tilePx];
+  }
+
+  /** วาดรูปทรงเวกเตอร์รอบจุดกำเนิดที่ slot (พิกัด tile) โดยสเกลตาม tilePx ให้ได้สัดส่วนเดิมเสมอ */
+  function atSlot(cx, cy, drawFn) {
+    ctx.save();
+    ctx.translate(cx * tilePx, cy * tilePx);
+    ctx.scale(UNIT, UNIT);
+    drawFn();
+    ctx.restore();
+  }
 
   function setupCanvas() {
     const dpr = window.devicePixelRatio || 1;
@@ -102,42 +153,50 @@ export function createRenderer({ canvas, zones, assets }) {
   // หมายเหตุ: ห้ามมี effect ที่ขึ้นกับเวลา (พัลส์/หมุน) นอกโซน Approval (spec §7.4) — จอมอนิเตอร์นี้
   // จึงเป็นสีนิ่ง ไม่ใช่ไฟกะพริบ
   function drawDesk(cx, cy) {
-    ctx.fillStyle = "#5b4327";
-    ctx.fillRect(cx * TILE - 20, cy * TILE - 30, 40, 18);
-    ctx.strokeStyle = "#2c2116";
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(cx * TILE - 20, cy * TILE - 30, 40, 18);
-    ctx.fillStyle = "#111318";
-    ctx.fillRect(cx * TILE - 8, cy * TILE - 40, 16, 11);
-    ctx.fillStyle = "rgba(120,200,255,0.45)";
-    ctx.fillRect(cx * TILE - 6, cy * TILE - 38, 12, 7);
+    atSlot(cx, cy, () => {
+      ctx.fillStyle = "#5b4327";
+      ctx.fillRect(-20, -30, 40, 18);
+      ctx.strokeStyle = "#2c2116";
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(-20, -30, 40, 18);
+      ctx.fillStyle = "#111318";
+      ctx.fillRect(-8, -40, 16, 11);
+      ctx.fillStyle = "rgba(120,200,255,0.45)";
+      ctx.fillRect(-6, -38, 12, 7);
+    });
   }
   function drawSofa(cx, cy) {
-    ctx.fillStyle = "#3b6a8f";
-    roundRectPath(ctx, cx * TILE - 18, cy * TILE - 16, 36, 20, 6);
-    ctx.fill();
-    ctx.fillStyle = "#2c4f6b";
-    ctx.fillRect(cx * TILE - 18, cy * TILE - 16, 36, 6);
+    atSlot(cx, cy, () => {
+      ctx.fillStyle = "#3b6a8f";
+      roundRectPath(ctx, -18, -16, 36, 20, 6);
+      ctx.fill();
+      ctx.fillStyle = "#2c4f6b";
+      ctx.fillRect(-18, -16, 36, 6);
+    });
   }
   function drawTable(cx, cy) {
-    ctx.fillStyle = "#6b5220";
-    ctx.beginPath();
-    ctx.ellipse(cx * TILE, cy * TILE, 34, 20, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = "#3c2f13";
-    ctx.lineWidth = 2;
-    ctx.stroke();
+    atSlot(cx, cy, () => {
+      ctx.fillStyle = "#6b5220";
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 34, 20, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#3c2f13";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    });
   }
   function drawScreenProp(cx, cy) {
-    ctx.fillStyle = "#111318";
-    ctx.fillRect(cx * TILE - 14, cy * TILE - 26, 28, 20);
-    ctx.fillStyle = "rgba(139,108,255,0.55)";
-    ctx.fillRect(cx * TILE - 11, cy * TILE - 23, 22, 14);
+    atSlot(cx, cy, () => {
+      ctx.fillStyle = "#111318";
+      ctx.fillRect(-14, -26, 28, 20);
+      ctx.fillStyle = "rgba(139,108,255,0.55)";
+      ctx.fillRect(-11, -23, 22, 14);
+    });
   }
   function drawCracks(rect) {
     const [x, y, w, h] = tileRect(rect);
     ctx.strokeStyle = "rgba(0,0,0,.5)";
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 2 * UNIT;
     const paths = [
       [
         [x + w * 0.2, y + h * 0.3],
@@ -160,11 +219,11 @@ export function createRenderer({ canvas, zones, assets }) {
   function drawBarrier(rect) {
     const [x, y, w] = tileRect(rect);
     ctx.strokeStyle = "#d8b23a";
-    ctx.lineWidth = 3;
-    ctx.setLineDash([8, 6]);
+    ctx.lineWidth = 3 * UNIT;
+    ctx.setLineDash([8 * UNIT, 6 * UNIT]);
     ctx.beginPath();
-    ctx.moveTo(x + 8, y + 12);
-    ctx.lineTo(x + w - 8, y + 12);
+    ctx.moveTo(x + 8 * UNIT, y + 12 * UNIT);
+    ctx.lineTo(x + w - 8 * UNIT, y + 12 * UNIT);
     ctx.stroke();
     ctx.setLineDash([]);
   }
@@ -181,51 +240,106 @@ export function createRenderer({ canvas, zones, assets }) {
   /** จุดเด่นที่สุดในห้อง (spec §7.2): dais ยกพื้น + สปอตไลต์พัลส์ + วงแหวนหมุน — เฉพาะโซน Approval */
   function drawApprovalSpotlight(now) {
     const az = zones.approval;
-    const cx = az.center.x * TILE;
-    const cy = az.center.y * TILE;
     const pulse = 0.5 + 0.5 * Math.sin(now / 900);
 
-    const grad = ctx.createRadialGradient(cx, cy, 10, cx, cy, 130 + pulse * 14);
-    grad.addColorStop(0, `rgba(255,214,120,${0.32 + pulse * 0.1})`);
-    grad.addColorStop(1, "rgba(255,214,120,0)");
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.arc(cx, cy, 130 + pulse * 14, 0, Math.PI * 2);
-    ctx.fill();
+    atSlot(az.center.x, az.center.y, () => {
+      const grad = ctx.createRadialGradient(0, 0, 10, 0, 0, 130 + pulse * 14);
+      grad.addColorStop(0, `rgba(255,214,120,${0.32 + pulse * 0.1})`);
+      grad.addColorStop(1, "rgba(255,214,120,0)");
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(0, 0, 130 + pulse * 14, 0, Math.PI * 2);
+      ctx.fill();
 
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.rotate(now / 4000);
-    ctx.strokeStyle = `rgba(255,214,120,${0.55 + pulse * 0.25})`;
-    ctx.lineWidth = 2;
-    ctx.setLineDash([10, 8]);
-    ctx.beginPath();
-    ctx.arc(0, 0, 78, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.restore();
+      ctx.save();
+      ctx.rotate(now / 4000);
+      ctx.strokeStyle = `rgba(255,214,120,${0.55 + pulse * 0.25})`;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([10, 8]);
+      ctx.beginPath();
+      ctx.arc(0, 0, 78, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
 
-    ctx.fillStyle = "rgba(0,0,0,.25)";
-    roundRectPath(ctx, cx - 92, cy - 52 + 6, 184, 108, 14);
-    ctx.fill();
-    ctx.fillStyle = "rgba(255,214,120,.18)";
-    roundRectPath(ctx, cx - 92, cy - 52, 184, 108, 14);
-    ctx.fill();
-    ctx.strokeStyle = "rgba(255,214,120,.55)";
-    ctx.lineWidth = 2;
-    roundRectPath(ctx, cx - 92, cy - 52, 184, 108, 14);
-    ctx.stroke();
+      ctx.fillStyle = "rgba(0,0,0,.25)";
+      roundRectPath(ctx, -92, -52 + 6, 184, 108, 14);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255,214,120,.18)";
+      roundRectPath(ctx, -92, -52, 184, 108, 14);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255,214,120,.55)";
+      ctx.lineWidth = 2;
+      roundRectPath(ctx, -92, -52, 184, 108, 14);
+      ctx.stroke();
+    });
 
     drawTable(az.center.x, az.center.y);
   }
 
+  /**
+   * ผังห้องจริงจาก tileset + map.json (spec §8.1/§8.2) — null เมื่อชุด asset ไม่มี map ให้วาด
+   * (ตอนนั้นตกกลับไปใช้พื้นโซนสีทึบแบบ placeholder ซึ่งยังใช้งานได้ครบทุกฟีเจอร์)
+   *
+   * ขนาด tile ต้นฉบับที่ใช้ "หั่น" ชีต ยึด `manifest.room.tileSize` เป็นแหล่งเดียว (ไม่ใช่
+   * `map.tilesets[].tilewidth`) ให้ tileSize เป็นปุ่มเดียวตามที่ spec §8.2 เขียนไว้ — จำนวนคอลัมน์
+   * จึงคำนวณจากความกว้างจริงของรูป ไม่อ่าน `columns` ในไฟล์ map
+   */
+  const mapInfo = (() => {
+    if (assets.mode !== "sprites" || !assets.tileset || !assets.map) return null;
+    const layers = tileLayersOf(assets.map);
+    if (!layers.length) return null;
+    const src = Number(assets.tileSize);
+    if (!(src > 0)) return null;
+    const sheetW = assets.tileset.naturalWidth || assets.tileset.width || 0;
+    const columns = Math.max(1, Math.floor(sheetW / src));
+    const firstgid = Number(assets.map.tilesets?.[0]?.firstgid) || 1;
+    return { layers, src, columns, firstgid };
+  })();
+
+  function drawTiledMap() {
+    const { layers, src, columns, firstgid } = mapInfo;
+    for (const layer of layers) {
+      const stride = Number(layer.width) > 0 ? Math.floor(layer.width) : cols;
+      const ox = Number(layer.x) || 0;
+      const oy = Number(layer.y) || 0;
+      const data = layer.data;
+      for (let i = 0; i < data.length; i++) {
+        const gid = data[i];
+        if (!gid) continue; // 0 = ไม่มี tile ช่องนี้
+        const index = gid - firstgid;
+        if (index < 0) continue;
+        ctx.drawImage(
+          assets.tileset,
+          (index % columns) * src,
+          Math.floor(index / columns) * src,
+          src,
+          src,
+          (ox + (i % stride)) * tilePx,
+          (oy + Math.floor(i / stride)) * tilePx,
+          tilePx,
+          tilePx,
+        );
+      }
+    }
+  }
+
+  /**
+   * พื้นโซน — มีสองโหมด:
+   *  - มีผังห้องจริง: เคลือบสีโซนแบบโปร่ง ให้ลายไม้/ผนังของ tileset ยังเห็นชัด แต่ยังแยกโซนออกด้วยสี
+   *  - ไม่มีผังห้อง (placeholder): สี่เหลี่ยมทึบแบบเดิมเป๊ะ ๆ
+   */
   function drawZoneFloors() {
+    const tinted = Boolean(mapInfo);
     for (const id of ZONE_IDS) {
       const z = zones[id];
       const [x, y, w, h] = tileRect(z.rect);
+      ctx.save();
+      if (tinted) ctx.globalAlpha = 0.3;
       ctx.fillStyle = ZONE_FLOOR[id];
       ctx.fillRect(x, y, w, h);
-      ctx.strokeStyle = "rgba(255,255,255,.06)";
+      ctx.restore();
+      ctx.strokeStyle = tinted ? "rgba(255,255,255,.16)" : "rgba(255,255,255,.06)";
       ctx.lineWidth = 1;
       ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
     }
@@ -295,7 +409,7 @@ export function createRenderer({ canvas, zones, assets }) {
     const bodyColor = meta.role ? ROLE_META[meta.role].color : STATE_META[meta.state]?.color || "#888";
 
     if (assets.mode === "sprites") {
-      drawSpriteFrame(meta, dir);
+      drawSpriteFrame(item, dir);
     } else {
       // placeholder เรขาคณิต — สี่เหลี่ยมมนหัว+ตัว ในกรอบ 64x64 เดิมเป๊ะ (จะสลับเป็น drawImage
       // ทีหลังได้โดยไม่ต้องแก้ layout ใด ๆ ตามที่ prototype #11 พิสูจน์ไว้)
@@ -338,23 +452,53 @@ export function createRenderer({ canvas, zones, assets }) {
     ctx.restore();
   }
 
-  /** โหมด sprite จริง — geometry ทั้งหมดอ่านจาก manifest เท่านั้น ห้าม assume ขนาด/จำนวนเฟรม (spec §8.2) */
-  function drawSpriteFrame(meta, dir) {
-    const { manifest, characterImages, folders } = assets;
+  /**
+   * คลี่ชื่อท่า → ชีตจริงที่โหลดไว้ ตาม `fallback` ใน manifest (เช่น sleep → sit)
+   * คืน null เมื่อไม่มีชีตให้ใช้จริง ๆ เพื่อให้ผู้เรียกตกกลับไปท่าอื่นได้แทนที่จะวาดไม่ออก
+   */
+  function resolveAnim(folder, name, depth = 0) {
+    if (!name || depth > 3) return null; // depth กัน fallback วนกันเอง
+    const def = assets.manifest.character.animations?.[name];
+    if (!def) return null;
+    if (def.fallback) return resolveAnim(folder, def.fallback, depth + 1);
+    const img = assets.characterImages[folder]?.[name];
+    return img ? { img, def } : null;
+  }
+
+  /**
+   * โหมด sprite จริง — geometry ทั้งหมดอ่านจาก manifest เท่านั้น ห้าม assume ขนาด/จำนวนเฟรม (spec §8.2)
+   *
+   * ท่า (spec §7.4): กำลังย้ายโซน → `walk` เล่นวนตาม `frames`/`fps` ของ manifest และเลือกแถวจาก
+   * ทิศการเคลื่อนที่ · อยู่นิ่ง → ท่าตาม `manifest.states[state].anim` **ตรึงเฟรมเดียว** โดยตั้งใจ
+   * เพราะท่าอยู่นิ่งของ LPC ไม่ใช่ลูปเดิน (`sit.png` 3 "เฟรม" คือ 3 ท่านั่งคนละท่า เล่นวนแล้วจะกระตุก)
+   */
+  function drawSpriteFrame(item, dir) {
+    const { manifest, folders } = assets; // ตัวชีตเองหยิบผ่าน resolveAnim()
+    const meta = item.meta;
     const folder = folders[pickCharacterFolder(meta.id, folders.length)];
-    const stateCfg = manifest.states?.[meta.state];
-    const animName = stateCfg?.anim || "idle";
-    const animDef = manifest.character.animations?.[animName];
-    const resolvedAnimName = animDef?.fallback || animName;
-    const img = characterImages[folder]?.[resolvedAnimName];
-    if (!img) return; // ป้องกัน crash ถ้า manifest อ้างถึงไฟล์ที่โหลดไม่สำเร็จ
-    const [fw, fh] = manifest.character.frameSize;
-    const dirIndex = Math.max(0, (manifest.character.directions || []).indexOf(dir));
-    const [offX, offY] = manifest.character.offset || [0, 0];
-    const frameIndex = 0; // เฟรมแรกพอสำหรับ static snapshot (ไม่ animate ท่าเดินระหว่างยืนนิ่ง)
-    const sx = offX + frameIndex * fw;
-    const sy = offY + Math.max(0, dirIndex) * fh;
-    ctx.drawImage(img, sx, sy, fw, fh, -fw / 2, -(manifest.character.anchor?.[1] ?? fh - 2), fw, fh);
+    const walking = item.moving ? resolveAnim(folder, WALK_ANIM) : null;
+    const anim = walking || resolveAnim(folder, manifest.states?.[meta.state]?.anim || "idle");
+    if (!anim) return; // ป้องกัน crash ถ้า manifest อ้างถึงไฟล์ที่โหลดไม่สำเร็จ
+
+    const chr = manifest.character;
+    const [fw, fh] = chr.frameSize;
+    const dirIndex = Math.max(0, (chr.directions || DEFAULT_DIRECTIONS).indexOf(dir));
+    const [offX, offY] = chr.offset || [0, 0];
+    const anchor = chr.anchor || [];
+    const anchorX = Number.isFinite(anchor[0]) ? anchor[0] : fw / 2;
+    const anchorY = Number.isFinite(anchor[1]) ? anchor[1] : fh - 2;
+    const frameIndex = walking ? animationFrameIndex(item.animMs, anim.def.frames, anim.def.fps) : 0;
+    ctx.drawImage(
+      anim.img,
+      offX + frameIndex * fw,
+      offY + dirIndex * fh,
+      fw,
+      fh,
+      -anchorX,
+      -anchorY,
+      fw,
+      fh,
+    );
   }
 
   /**
@@ -373,40 +517,84 @@ export function createRenderer({ canvas, zones, assets }) {
     return clipped.length > 0 ? clipped + "…" : "…";
   }
 
-  /** วาดป้ายเดี่ยว (ใช้ทั้งป้ายโซนและป้ายตัวละคร) — แผ่นรองสีทึบกันโดนบัง (spec §7.2 บั๊กที่เจอใน prototype)
-   *  แต่ละบรรทัดตั้ง `maxWidth` (px) ได้เพื่อกันป้ายชนกันเองตอนที่นั่งชิดกัน (ดู clipTextToWidth ข้างบน) */
-  function drawLabelPlate(cx, y, lines, opts = {}) {
-    const { bold = false, sub = false, fg = "rgba(255,255,255,.92)", bg = "rgba(0,0,0,.6)" } = opts;
-    ctx.textAlign = "center";
-    let cursorY = y;
+  /**
+   * เตรียมบรรทัดของป้ายให้พร้อมวาด: ตัดข้อความ **ครั้งเดียว** แล้วจำทั้งสตริงสุดท้ายและความกว้างจริงไว้
+   * (สำคัญ: ต้องวัดกับสตริงเดียวกับที่จะวาด ไม่งั้นกรอบที่เอาไปกันป้ายชนกันจะไม่ตรงกับพิกเซลที่เห็น)
+   * แต่ละบรรทัดตั้ง `maxWidth` (px) ได้ และ `suffix` คือส่วนท้ายที่ต้องรอดจากการตัดเสมอ (นาฬิกา)
+   */
+  function layoutLabel(lines, opts = {}) {
+    const { bold = false, sub = false } = opts;
+    const prepared = [];
+    let widest = 0;
     for (const line of lines) {
-      if (!line.text && !line.suffix) continue;
-      ctx.font = line.font || (bold ? "bold 12px sans-serif" : sub ? "10px sans-serif" : "600 11px sans-serif");
-      // `suffix` คือส่วนท้ายที่ต้องรอดจากการตัดเสมอ (นาฬิกา) — ตัดเฉพาะ `line.text` ในงบที่เหลือ
-      // ถ้าเอาสองส่วนมาต่อกันก่อนแล้วค่อยตัด ชื่อเธรดภาษาไทยความยาวปกติจะกินงบ 108px หมดตั้งแต่ชื่อ
-      // แล้วนาฬิกาซึ่งอยู่ท้ายสุดจะถูกตัดทิ้งทุกป้ายในห้อง (สังเกตว่า `ctx.font` ต้องถูกตั้งก่อนวัด)
+      if (!line || (!line.text && !line.suffix)) continue;
+      const font =
+        line.font || (bold ? "bold 12px sans-serif" : sub ? "10px sans-serif" : "600 11px sans-serif");
+      ctx.font = font;
+      // ตัดเฉพาะ `line.text` ในงบที่เหลือหลังกันที่ให้ `suffix` — ถ้าเอาสองส่วนมาต่อกันก่อนแล้วค่อยตัด
+      // ชื่อเธรดภาษาไทยความยาวปกติจะกินงบ 108px หมดตั้งแต่ชื่อ แล้วนาฬิกาซึ่งอยู่ท้ายสุดจะถูกตัดทิ้ง
+      // ทุกป้ายในห้อง (สังเกตว่า `ctx.font` ต้องถูกตั้งก่อนวัดเสมอ)
       const suffix = line.suffix || "";
       const budget = line.maxWidth
         ? Math.max(MIN_LABEL_TEXT_WIDTH, line.maxWidth - ctx.measureText(suffix).width)
         : line.maxWidth;
       const text = clipTextToWidth(ctx, line.text || "", budget) + suffix;
-      const tw = ctx.measureText(text).width;
-      ctx.fillStyle = line.bg || bg;
-      roundRectPath(ctx, cx - tw / 2 - 5, cursorY - 12, tw + 10, 15, 5);
-      ctx.fill();
-      ctx.fillStyle = line.fg || fg;
-      ctx.fillText(text, cx, cursorY);
-      cursorY += 14;
+      const w = ctx.measureText(text).width;
+      prepared.push({ font, text, w, fg: line.fg, bg: line.bg });
+      if (w > widest) widest = w;
     }
-    return cursorY;
+    return { lines: prepared, width: widest + LABEL_PLATE_PAD_X * 2 };
   }
 
-  function drawZoneLabels(now) {
+  /** กรอบที่ป้าย (ที่ layoutLabel เตรียมไว้) จะกินจริงเมื่อวาดที่ (cx, y) — ใช้กันป้ายชนกัน */
+  function labelBox(cx, y, prepared) {
+    const rows = Math.max(0, prepared.lines.length - 1);
+    return {
+      x1: cx - prepared.width / 2,
+      x2: cx + prepared.width / 2,
+      y1: y - 12,
+      y2: y - 12 + rows * LABEL_LINE_H + LABEL_PLATE_H,
+    };
+  }
+
+  /** วาดป้ายที่เตรียมไว้แล้ว — แผ่นรองสีทึบกันโดนบัง (spec §7.2 บั๊กที่เจอใน prototype) */
+  function drawPreparedLabel(cx, y, prepared, opts = {}) {
+    const { fg = "rgba(255,255,255,.92)", bg = "rgba(0,0,0,.6)" } = opts;
+    ctx.textAlign = "center";
+    let cursorY = y;
+    for (const line of prepared.lines) {
+      ctx.font = line.font;
+      ctx.fillStyle = line.bg || bg;
+      roundRectPath(
+        ctx,
+        cx - line.w / 2 - LABEL_PLATE_PAD_X,
+        cursorY - 12,
+        line.w + LABEL_PLATE_PAD_X * 2,
+        LABEL_PLATE_H,
+        5,
+      );
+      ctx.fill();
+      ctx.fillStyle = line.fg || fg;
+      ctx.fillText(line.text, cx, cursorY);
+      cursorY += LABEL_LINE_H;
+    }
+  }
+
+  /** วาดป้ายเดี่ยว (ใช้ทั้งป้ายโซนและป้ายอื่นที่ตำแหน่งตายตัว) — คืนกรอบที่กินไปเพื่อให้ป้ายตัวละครหลบ */
+  function drawLabelPlate(cx, y, lines, opts = {}) {
+    const prepared = layoutLabel(lines, opts);
+    drawPreparedLabel(cx, y, prepared, opts);
+    return labelBox(cx, y, prepared);
+  }
+
+  /** ป้ายโซนทั้งหมด — คืนกรอบทุกอันเพื่อให้ป้ายตัวละครหลบ (spec §7.2: ป้ายโซนต้องอ่านออกเสมอ) */
+  function drawZoneLabels() {
+    const boxes = [];
     for (const id of ZONE_IDS) {
       const z = zones[id];
       const [x, y, w] = tileRect(z.rect);
       const isApproval = id === "approval";
-      drawLabelPlate(x + w / 2, y + (isApproval ? 20 : 16), [
+      boxes.push(drawLabelPlate(x + w / 2, y + (isApproval ? 20 : 16), [
         {
           text: `${z.icon} ${z.label}`,
           font: isApproval ? "bold 15px sans-serif" : "600 12px sans-serif",
@@ -421,24 +609,25 @@ export function createRenderer({ canvas, zones, assets }) {
               bg: "rgba(74,58,18,.65)",
             }
           : null,
-      ].filter(Boolean));
+      ].filter(Boolean)));
     }
     {
       const [x, y, w, h] = tileRect(zones.browser.rect);
-      drawLabelPlate(x + w / 2, y + h - 6, [
-        { text: "FIFO: มาก่อนได้ก่อน", font: "10px sans-serif", bg: "rgba(0,0,0,.5)", fg: "rgba(255,255,255,.85)" },
-      ]);
+      boxes.push(
+        drawLabelPlate(x + w / 2, y + h - 6, [
+          { text: "FIFO: มาก่อนได้ก่อน", font: "10px sans-serif", bg: "rgba(0,0,0,.5)", fg: "rgba(255,255,255,.85)" },
+        ]),
+      );
     }
+    return boxes;
   }
 
   /** โต๊ะ Browser แสดงป้ายชื่อผู้ถือเสมอ แม้ตัวถือจะไปยืนที่โซน Approval (P2 > P3 — spec §7.3) */
   function drawBrowserHolderNameplate(holderMeta) {
-    if (!holderMeta) return;
+    if (!holderMeta) return null;
+    if (holderMeta.zone === "browser") return null; // อยู่ที่โต๊ะอยู่แล้ว ป้ายตัวละครพอ ไม่ต้องซ้ำ
     const slot = zones.browser.holderSlot;
-    const cx = slot.x * TILE;
-    const cy = slot.y * TILE;
-    if (holderMeta.zone === "browser") return; // อยู่ที่โต๊ะอยู่แล้ว ป้ายตัวละครพอ ไม่ต้องซ้ำ
-    drawLabelPlate(cx, cy + 30, [
+    return drawLabelPlate(slot.x * tilePx, slot.y * tilePx + 30, [
       {
         text: `🌐 ${holderMeta.label} (ถือ Browser)`,
         font: "bold 10px sans-serif",
@@ -451,10 +640,11 @@ export function createRenderer({ canvas, zones, assets }) {
   // ป้าย/marker ของ Schedule auto-pause — สีนิ่ง ไม่พัลส์ (เอฟเฟกต์ที่ขึ้นกับเวลามีได้เฉพาะโซน Approval, spec §7.4)
   function drawAutoPausedMarkers(markers) {
     const hitboxes = [];
+    const boxes = [];
     const [bx, by] = zones.bug.rect;
     markers.forEach((m, i) => {
-      const cx = (bx + 0.9 + i * 1.7) * TILE;
-      const cy = (by + 0.7) * TILE;
+      const cx = (bx + 0.9 + i * 1.7) * tilePx;
+      const cy = (by + 0.7) * tilePx;
       ctx.beginPath();
       ctx.arc(cx, cy, 12, 0, Math.PI * 2);
       ctx.fillStyle = "rgba(213,60,60,0.65)";
@@ -469,13 +659,64 @@ export function createRenderer({ canvas, zones, assets }) {
       ctx.fillText("⏸", cx, cy + 1);
       ctx.textBaseline = "alphabetic";
       hitboxes.push({ kind: "schedule", id: m.id, x1: cx - 14, y1: cy - 14, x2: cx + 14, y2: cy + 14 });
+      boxes.push({ x1: cx - 14, y1: cy - 14, x2: cx + 14, y2: cy + 14 });
     });
     if (markers.length) {
-      drawLabelPlate((bx + 0.9) * TILE, (by + 1.6) * TILE, [
-        { text: "Schedule auto-pause", font: "9px sans-serif", bg: "rgba(0,0,0,.55)" },
-      ]);
+      boxes.push(
+        drawLabelPlate((bx + 0.9) * tilePx, (by + 1.6) * tilePx, [
+          { text: "Schedule auto-pause", font: "9px sans-serif", bg: "rgba(0,0,0,.55)" },
+        ]),
+      );
     }
-    return hitboxes;
+    return { hitboxes, boxes };
+  }
+
+  /**
+   * ป้ายชื่อตัวละคร — pass สุดท้ายเสมอ (spec §7.2) พร้อมกันป้ายทับกันเอง:
+   * ป้ายที่กรอบชนของที่วางไปแล้ว (ป้ายโซน / ป้ายตัวอื่น / ป้ายผู้ถือ Browser) ถูก **ดันลง** ทีละแถว
+   * จนไม่ชน — เลือกวิธีนี้แทนการบีบข้อความให้แคบลง เพราะโซน grid 3 คอลัมน์ (stopped/bug ห่างกัน ~54px)
+   * และคิว Browser (~58px) แคบกว่าความกว้างขั้นต่ำของ "ชื่อ + นาฬิกา" อยู่แล้ว บีบเท่าไรก็ยังทับ
+   * และการบีบจนนาฬิกาหาย/งบเหลือ 0 คือบั๊กที่ commit ก่อนหน้าเพิ่งแก้ไป
+   *
+   * ลำดับพิจารณาต้องนิ่งข้ามเฟรม (y แล้วค่อย id) ไม่งั้นตอนทุกคนยืนนิ่งที่ y เท่ากัน ป้ายจะสลับแถวกันไปมา
+   */
+  function drawCharacterLabels(items, hostNowMs, occupied) {
+    const ordered = [...items].sort((a, b) => a.y - b.y || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    for (const item of ordered) {
+      const clock = getClockInfo(item.meta, hostNowMs);
+      const clockGlyph = clock.countdown ? "⏳" : "⏱";
+      const prepared = layoutLabel(
+        [
+          {
+            text: item.meta.label,
+            // นาฬิกาเป็น `suffix` ไม่ใช่ส่วนหนึ่งของ text — ห้ามให้ชื่อเธรดยาว ๆ ตัดมันทิ้ง (spec §5.6)
+            suffix: `  ${clockGlyph}${clock.text}`,
+            font: "600 10px sans-serif",
+            maxWidth: CHARACTER_LABEL_MAX_WIDTH,
+          },
+          item.meta.headline
+            ? {
+                text: item.meta.headline,
+                font: "9px sans-serif",
+                fg: "rgba(255,255,255,.75)",
+                maxWidth: CHARACTER_LABEL_MAX_WIDTH,
+              }
+            : null,
+        ].filter(Boolean),
+      );
+
+      let y = item.y + 16;
+      let box = labelBox(item.x, y, prepared);
+      for (let push = 0; push < LABEL_MAX_PUSH && occupied.some((o) => boxesOverlap(o, box)); push++) {
+        y += LABEL_PUSH_STEP;
+        box = labelBox(item.x, y, prepared);
+      }
+      occupied.push(box);
+
+      ctx.globalAlpha = item.alpha;
+      drawPreparedLabel(item.x, y, prepared);
+      ctx.globalAlpha = 1;
+    }
   }
 
   /**
@@ -491,6 +732,7 @@ export function createRenderer({ canvas, zones, assets }) {
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = "#171a21";
     ctx.fillRect(0, 0, W, H);
+    if (mapInfo) drawTiledMap(); // ผังห้องจริงจาก tileset ก่อน แล้วค่อยเคลือบสีโซนทับแบบโปร่ง
     drawZoneFloors();
     drawDecorations(t);
     ctx.strokeStyle = "#000";
@@ -511,39 +753,21 @@ export function createRenderer({ canvas, zones, assets }) {
       });
     }
 
+    // marker ของ Schedule วาดก่อนป้ายชื่อ เพื่อให้ป้ายชื่อตัวละครหลบมันได้ (ไม่ใช่ทับมัน)
+    const schedule = drawAutoPausedMarkers(autoPausedSchedules || []);
+
     const holderMeta = browserQueue?.holder
       ? withSelection.find((i) => i.id === browserQueue.holder)?.meta
       : null;
-    drawBrowserHolderNameplate(holderMeta);
+    const holderBox = drawBrowserHolderNameplate(holderMeta);
 
     // ป้ายชื่อ (โซน + ตัวละคร) เป็น pass สุดท้ายเสมอ กันตัวละครแถวแรกบัง (spec §7.2)
-    drawZoneLabels(t);
-    for (const item of withSelection) {
-      const clock = getClockInfo({ ...item.meta, zone: item.meta.zone }, hostNowMs);
-      const clockGlyph = clock.countdown ? "⏳" : "⏱";
-      ctx.globalAlpha = item.alpha;
-      drawLabelPlate(item.x, item.y + 16, [
-        {
-          text: item.meta.label,
-          // นาฬิกาเป็น `suffix` ไม่ใช่ส่วนหนึ่งของ text — ห้ามให้ชื่อเธรดยาว ๆ ตัดมันทิ้ง (spec §5.6)
-          suffix: `  ${clockGlyph}${clock.text}`,
-          font: "600 10px sans-serif",
-          maxWidth: CHARACTER_LABEL_MAX_WIDTH,
-        },
-        item.meta.headline
-          ? {
-              text: item.meta.headline,
-              font: "9px sans-serif",
-              fg: "rgba(255,255,255,.75)",
-              maxWidth: CHARACTER_LABEL_MAX_WIDTH,
-            }
-          : null,
-      ].filter(Boolean));
-      ctx.globalAlpha = 1;
-    }
+    // `occupied` เริ่มจากป้ายที่ตำแหน่งตายตัว (โซน/ผู้ถือ Browser/auto-pause) แล้วป้ายตัวละครหลบให้
+    const occupied = [...drawZoneLabels(), ...schedule.boxes];
+    if (holderBox) occupied.push(holderBox);
+    drawCharacterLabels(withSelection, hostNowMs, occupied);
 
-    const scheduleHitboxes = drawAutoPausedMarkers(autoPausedSchedules || []);
-    return [...hitboxes, ...scheduleHitboxes];
+    return [...hitboxes, ...schedule.hitboxes];
   }
 
   return { draw, W, H };

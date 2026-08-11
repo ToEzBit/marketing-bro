@@ -7,16 +7,25 @@
 
 "use strict";
 
-/** px ต่อ tile ของห้อง (ตรงกับ manifest.room.tileSize ค่าเริ่มต้น) */
+/** px ต่อ tile ของห้อง **ค่าเริ่มต้น** — ค่าจริงตอนรันมาจาก `manifest.room.tileSize * room.scale`
+ *  (ดู tilePxOf() ใน assets.js) แล้วส่งเข้า worldPos()/createRoomState()/createRenderer() เป็นพารามิเตอร์
+ *  ห้ามใช้ค่านี้เป็น "ขนาด tile จริง" ในโค้ดที่วาด — spec §8.2 บังคับว่าโค้ดห้าม assume ขนาด */
 export const TILE = 32;
 /** px ต่อเฟรมสไปรต์ตัวละคร (ตรงกับ manifest.character.frameSize ค่าเริ่มต้น) */
 export const FRAME = 64;
 /** จุดเท้าของตัวละครภายในเฟรม (ตรงกับ manifest.character.anchor ค่าเริ่มต้น) */
 export const ANCHOR = { x: 32, y: 62 };
-/** ขนาดห้องเป็น tile — 32 คอลัมน์ x 16 แถว = canvas 1024x512px */
+/** ขนาดห้องเป็น tile **ค่าเริ่มต้น** — ถูกแทนด้วย map.width/height เมื่อมี map.json (roomSizeFromMap) */
 export const ROOM = { cols: 32, rows: 16 };
-/** จุด "ประตู" ที่ตัวละครเดินเข้า/ออกตอนเกิด/หาย (กึ่งกลางผนังล่างของห้อง) */
-export const DOOR_SLOT = { x: 16, y: 15.4, dir: "up" };
+/** ลำดับแถวในชีตสไปรต์ค่าเริ่มต้น (ตรงกับ manifest.character.directions ของชุด LPC) */
+export const DEFAULT_DIRECTIONS = ["up", "left", "down", "right"];
+/** จุด "ประตู" ที่ตัวละครเดินเข้า/ออกตอนเกิด/หาย (กึ่งกลางผนังล่างของห้องขนาดเริ่มต้น) */
+export const DOOR_SLOT = doorSlotFor(ROOM.cols, ROOM.rows);
+
+/** ประตูของห้องขนาดใด ๆ — กึ่งกลางผนังล่าง (ห้องขนาดเริ่มต้น 32x16 ได้ค่าเดียวกับ DOOR_SLOT เป๊ะ) */
+export function doorSlotFor(cols = ROOM.cols, rows = ROOM.rows) {
+  return { x: cols / 2, y: rows - 0.6, dir: "up" };
+}
 
 /** ลำดับโซนคงที่ — ใช้ทั้งวาดพื้นห้องและวนลูป assign ที่นั่ง */
 export const ZONE_IDS = ["lounge", "stopped", "approval", "desks", "browser", "bug"];
@@ -131,9 +140,90 @@ export function buildZones(rectOverrides = {}) {
   return zones;
 }
 
-/** แปลง slot (พิกัด tile) เป็นพิกัด px กลางเวิลด์สำหรับวาด/glide */
-export function worldPos(slot) {
-  return { x: slot.x * TILE, y: slot.y * TILE };
+/**
+ * แปลง slot (พิกัด tile) เป็นพิกัด px กลางเวิลด์สำหรับวาด/glide
+ * @param {{x:number,y:number}} slot
+ * @param {number} [tilePx] px ต่อ tile ที่ใช้จริงตอนรัน (ค่าเริ่มต้น TILE — ห้าม assume ในโค้ดที่วาด)
+ */
+export function worldPos(slot, tilePx = TILE) {
+  return { x: slot.x * tilePx, y: slot.y * tilePx };
+}
+
+// ---------------------------------------------------------------------------
+// อ่าน map.json (Tiled JSON subset ตาม spec §8.2) — pure ล้วน ไม่แตะ network/DOM
+// ฟังก์ชันพวกนี้รับ object ที่ parse แล้วเข้ามา (assets.js เป็นคนไป fetch) จะได้เทสต์ได้ตรง ๆ
+// ---------------------------------------------------------------------------
+
+/**
+ * rect ของโซนจาก object layer ชื่อ `zones` — พิกัดในไฟล์เป็น **px** (มาตรฐาน Tiled) หารด้วย
+ * tilewidth/tileheight ของ map ให้เป็นหน่วย tile ตามที่ buildZones() ต้องการ
+ * ข้าม object ที่ชื่อไม่ใช่ zone id ที่รู้จัก และข้าม object ที่กว้าง/สูงเป็น 0 (point object)
+ * @param {any} map map.json ที่ parse แล้ว
+ * @returns {Record<string,[number,number,number,number]>} ใส่เฉพาะโซนที่เจอจริง (ที่เหลือใช้ค่า default)
+ */
+export function zoneRectsFromMap(map) {
+  /** @type {Record<string,[number,number,number,number]>} */
+  const rects = {};
+  if (!map || !Array.isArray(map.layers)) return rects;
+  const tw = Number(map.tilewidth);
+  const th = Number(map.tileheight);
+  if (!(tw > 0) || !(th > 0)) return rects;
+  const layer = map.layers.find((l) => l && l.type === "objectgroup" && l.name === "zones");
+  if (!layer || !Array.isArray(layer.objects)) return rects;
+  for (const obj of layer.objects) {
+    if (!obj || !ZONE_IDS.includes(obj.name)) continue;
+    const w = Number(obj.width) / tw;
+    const h = Number(obj.height) / th;
+    if (!(w > 0) || !(h > 0)) continue;
+    rects[obj.name] = [Number(obj.x) / tw, Number(obj.y) / th, w, h];
+  }
+  return rects;
+}
+
+/** ขนาดห้องเป็น tile จาก map.json — ไม่มี/พัง → ค่าเริ่มต้น ROOM (32x16) */
+export function roomSizeFromMap(map) {
+  const cols = Number(map?.width);
+  const rows = Number(map?.height);
+  if (cols > 0 && rows > 0) return { cols: Math.floor(cols), rows: Math.floor(rows) };
+  return { ...ROOM };
+}
+
+/** tile layer ทั้งหมดของ map ตามลำดับในไฟล์ (floor → walls → props) — layer อื่นถูกข้าม */
+export function tileLayersOf(map) {
+  if (!map || !Array.isArray(map.layers)) return [];
+  return map.layers.filter(
+    (l) => l && l.type === "tilelayer" && l.visible !== false && Array.isArray(l.data),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// อนิเมชันตัวละคร (spec §7.4) — pure ล้วนเช่นกัน render.js เป็นคนเอาไป drawImage
+// ---------------------------------------------------------------------------
+
+/**
+ * เลือก "แถว" ของชีตจากเวกเตอร์การเคลื่อนที่ — แกนที่ขยับเยอะกว่าเป็นตัวตัดสิน
+ * (จอเป็น y ลง ⇒ dy > 0 คือเดินลง) คืน null เมื่อไม่ได้ขยับเลย เพื่อให้ผู้เรียกคงทิศเดิมไว้
+ * @param {number} dx
+ * @param {number} dy
+ * @param {string[]} [directions] ลำดับแถวจาก manifest.character.directions
+ * @returns {string|null}
+ */
+export function directionFromVector(dx, dy, directions = DEFAULT_DIRECTIONS) {
+  if (!dx && !dy) return null;
+  const list = Array.isArray(directions) && directions.length ? directions : DEFAULT_DIRECTIONS;
+  const wanted = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : dy > 0 ? "down" : "up";
+  return list.includes(wanted) ? wanted : list[0];
+}
+
+/**
+ * เฟรมที่ควรวาด ณ เวลาที่ผ่านไป `elapsedMs` ของอนิเมชันที่มี `frames` เฟรมเล่นที่ `fps`
+ * — วนลูปเสมอ และคืน 0 อย่างปลอดภัยเมื่อ manifest ไม่ได้บอก frames/fps มา (ห้าม assume — spec §8.2)
+ */
+export function animationFrameIndex(elapsedMs, frames, fps) {
+  const count = Math.floor(Number(frames));
+  const rate = Number(fps);
+  if (!(count > 1) || !(rate > 0) || !Number.isFinite(elapsedMs)) return 0;
+  return Math.floor((Math.max(0, elapsedMs) * rate) / 1000) % count;
 }
 
 /** self-check ตอน dev: คืนคู่โซนที่ rect ซ้อนทับกัน ([] = ไม่ซ้อน) */

@@ -66,6 +66,19 @@ async function tryLoadSpriteSet(manifestUrl, setName) {
   const roomTilesetUrl = new URL(manifest.room.tileset, baseUrl).href;
   const anims = manifest.character.animations || {};
 
+  // map.json เป็น optional: ไม่มี/พัง → ยังใช้ชุดนี้ได้ปกติ แค่ตกกลับไปใช้ zone rect ค่าเริ่มต้นในโค้ด
+  // (แยกความล้มเหลวออกจาก tileset โดยตั้งใจ — manifest ที่ไม่ประกาศ room.map ก็ถือว่าถูกต้อง)
+  let map = null;
+  if (manifest.room.map) {
+    try {
+      map = await fetchJson(new URL(manifest.room.map, baseUrl).href);
+      if (!map) console.warn(`[office-ui] ไม่พบ ${manifest.room.map} ของชุด ${setName} — ใช้ผังห้องค่าเริ่มต้น`);
+    } catch (err) {
+      console.warn(`[office-ui] อ่าน map ของชุด ${setName} ไม่สำเร็จ: ${err} — ใช้ผังห้องค่าเริ่มต้น`);
+      map = null;
+    }
+  }
+
   try {
     const [tileset, ...folderImages] = await Promise.all([
       loadImage(roomTilesetUrl),
@@ -82,16 +95,22 @@ async function tryLoadSpriteSet(manifestUrl, setName) {
     const byFolder = {};
     for (const f of folderImages) byFolder[f.folder] = f.images;
 
+    const tileSize = manifest.room.tileSize;
+    const roomScale = manifest.room.scale || 1;
     return {
       mode: "sprites",
       setName,
       manifest,
       tileset,
+      map, // Tiled JSON ที่ parse แล้ว (หรือ null) — layout.js เป็นคนตีความ
       characterImages: byFolder, // folder -> { animName: HTMLImageElement }
       frameSize: manifest.character.frameSize,
       anchor: manifest.character.anchor || PLACEHOLDER_ANCHOR,
-      tileSize: manifest.room.tileSize,
-      roomScale: manifest.room.scale || 1,
+      tileSize,
+      roomScale,
+      /** px ต่อ tile บนจอจริง — ขนาดต้นฉบับใน tileset คูณ scale (spec §8.2: ชีต 16px ตั้ง scale 2
+       *  แล้วสัดส่วนกับตัวละคร 64px ไม่เพี้ยน) นี่คือค่าที่ทุกจุดที่วาดต้องใช้ ไม่ใช่ค่าคงที่ 32 */
+      tilePx: tilePxOf(tileSize, roomScale),
       folders: manifest.character.folders,
     };
   } catch (err) {
@@ -100,13 +119,26 @@ async function tryLoadSpriteSet(manifestUrl, setName) {
   }
 }
 
+/** px ต่อ tile บนจอ = ขนาดต้นฉบับ x scale — ปัดเป็นจำนวนเต็มกันรอยต่อ tile เป็นเส้นบาง ๆ ตอนวาด */
+export function tilePxOf(tileSize, scale = 1) {
+  const px = Math.round(Number(tileSize) * (Number(scale) || 1));
+  return px > 0 ? px : PLACEHOLDER_TILE_SIZE;
+}
+
+/** ชุด placeholder เรขาคณิต — export ไว้ให้ bootstrap ใช้เป็นตาข่ายกันจอขาวเมื่อ loadAssets() พังผิดคาด */
+export function placeholderAssets() {
+  return buildPlaceholderAssets();
+}
+
 function buildPlaceholderAssets() {
   return {
     mode: "placeholder",
+    map: null,
     frameSize: PLACEHOLDER_FRAME_SIZE,
     anchor: PLACEHOLDER_ANCHOR,
     tileSize: PLACEHOLDER_TILE_SIZE,
     roomScale: 1,
+    tilePx: PLACEHOLDER_TILE_SIZE,
     folders: Array.from({ length: PLACEHOLDER_FOLDER_COUNT }, (_, i) => `placeholder-${i}`),
   };
 }

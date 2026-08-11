@@ -8,18 +8,19 @@
 
 "use strict";
 
-import { buildZones, warnZoneOverlaps, DOOR_SLOT, worldPos } from "./layout.js";
+import {
+  buildZones,
+  warnZoneOverlaps,
+  doorSlotFor,
+  roomSizeFromMap,
+  zoneRectsFromMap,
+} from "./layout.js";
 import { createRoomState } from "./state.js";
-import { loadAssets } from "./assets.js";
+import { loadAssets, placeholderAssets } from "./assets.js";
 import { createRenderer, getClockInfo } from "./render.js";
 
 const params = new URLSearchParams(location.search);
 const isDemo = params.get("demo") === "1";
-
-const zones = buildZones();
-warnZoneOverlaps(zones); // self-check ตอน dev — เตือนเฉย ๆ ไม่ throw (spec §7.2)
-
-const room = createRoomState(zones);
 
 const canvas = document.getElementById("room");
 const connStatusEl = document.getElementById("connStatus");
@@ -28,6 +29,9 @@ const infocardEl = document.getElementById("infocard");
 const cardBodyEl = document.getElementById("cardBody");
 const btnCloseCard = document.getElementById("btnCloseCard");
 
+/** ทุกตัวนี้ถูกประกอบใน bootstrap() หลัง asset โหลดเสร็จเท่านั้น — ก่อนหน้านั้นยังไม่มีห้องให้แตะ */
+let zones = null;
+let room = null;
 let renderer = null;
 let latestSnapshot = null;
 let currentHitboxes = [];
@@ -50,18 +54,21 @@ function handleSnapshot(snapshot) {
 }
 
 // ---------------- แหล่งข้อมูล: demo mode หรือ SSE จริง ----------------
-if (isDemo) {
-  fetch("./dev-snapshot.json", { cache: "no-store" })
-    .then((res) => {
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
-    })
-    .then(handleSnapshot)
-    .catch((err) => {
-      console.error("[office-ui] โหลด dev-snapshot.json ไม่สำเร็จ:", err);
-      setConnected(false);
-    });
-} else {
+// เรียก **หลัง** ห้องถูกประกอบเสร็จเท่านั้น (handleSnapshot แตะ room ทันทีที่ snapshot แรกมาถึง)
+function connectDataSource() {
+  if (isDemo) {
+    fetch("./dev-snapshot.json", { cache: "no-store" })
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then(handleSnapshot)
+      .catch((err) => {
+        console.error("[office-ui] โหลด dev-snapshot.json ไม่สำเร็จ:", err);
+        setConnected(false);
+      });
+    return;
+  }
   setConnected(false); // ยังไม่มี snapshot แรกจนกว่า SSE จะส่งมา
   const es = new EventSource("/events");
   es.addEventListener("snapshot", (evt) => {
@@ -74,15 +81,39 @@ if (isDemo) {
   es.onerror = () => setConnected(false); // EventSource reconnect เองอัตโนมัติ
 }
 
-// ---------------- โหลด asset แล้วเริ่ม render loop ----------------
-loadAssets().then((assets) => {
-  renderer = createRenderer({ canvas, zones, assets });
+// ---------------- bootstrap: asset ก่อน แล้วค่อยประกอบห้อง แล้วค่อยรับข้อมูล ----------------
+// ลำดับนี้บังคับตัวเอง: เรขาคณิตของห้อง (tileSize/scale จาก manifest + zone rect จาก map.json)
+// ต้องรู้ผลก่อนสร้าง zones/roomState/renderer ไม่งั้นห้องถูกสร้างด้วยค่า default แล้วชุด custom
+// ที่ประกาศ tileSize อื่นจะเพี้ยนทั้งห้อง (spec §8.2 "โค้ดห้าม assume ขนาด")
+async function bootstrap() {
+  let assets;
+  try {
+    assets = await loadAssets();
+  } catch (err) {
+    // loadAssets() ดัก error ของตัวเองหมดแล้ว มาถึงตรงนี้ได้แปลว่าเป็นบั๊ก — แต่ยังต้องไม่จอขาว
+    console.error("[office-ui] bootstrap asset ล้มเหลวผิดคาด ใช้ placeholder แทน:", err);
+    assets = placeholderAssets();
+  }
+
+  const tilePx = assets.tilePx;
+  const roomSize = roomSizeFromMap(assets.map);
+  const door = doorSlotFor(roomSize.cols, roomSize.rows);
+
+  zones = buildZones(zoneRectsFromMap(assets.map));
+  warnZoneOverlaps(zones); // self-check ตอน dev — เตือนเฉย ๆ ไม่ throw (spec §7.2)
+
+  room = createRoomState(zones, { tilePx, door });
+  renderer = createRenderer({ canvas, zones, assets, roomSize });
+
   requestAnimationFrame(loop);
-});
+  connectDataSource();
+}
+
+bootstrap();
 
 function loop(t) {
   requestAnimationFrame(loop);
-  if (!renderer) return;
+  if (!renderer || !room) return;
   const now = Date.now();
   const hostNow = room.estimateHostNow(now);
   const drawList = room.getDrawList(now);
@@ -240,7 +271,3 @@ function hideInfoCard() {
 }
 
 btnCloseCard.addEventListener("click", hideInfoCard);
-
-// เผื่อโค้ดภายนอก/เทสต์ manual อยากอ่านตำแหน่งประตูจริงที่ใช้ (ไม่ได้ใช้ในแอปเอง)
-void DOOR_SLOT;
-void worldPos;

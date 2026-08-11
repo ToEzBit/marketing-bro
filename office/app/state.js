@@ -11,7 +11,7 @@
 
 "use strict";
 
-import { zoneAndRoleFor, worldPos, TILE, DOOR_SLOT } from "./layout.js";
+import { zoneAndRoleFor, worldPos, TILE, DOOR_SLOT, directionFromVector } from "./layout.js";
 
 /** ความเร็วเดินของตัวละครระหว่างโซน — spec §7.4 "ประมาณ 4 tile/วินาที" */
 export const GLIDE_TILES_PER_SEC = 4;
@@ -77,8 +77,13 @@ function assignSlots(prevAssignment, idsInZone, slotCount) {
 /**
  * สร้างสถานะห้องหนึ่งชุด (position cache + slot memory) ผูกกับ zones ที่กำหนด
  * @param {ReturnType<import("./layout.js").buildZones>} zones
+ * @param {{tilePx?:number, door?:{x:number,y:number,dir?:string}}} [options]
+ *   `tilePx` = px ต่อ tile จริงจาก manifest (ค่าเริ่มต้น TILE) — คุมทั้งพิกัดปลายทางและความเร็วเดิน
+ *   `door` = ประตูของห้องขนาดจริงจาก map.json (ค่าเริ่มต้น DOOR_SLOT ของห้อง 32x16)
  */
-export function createRoomState(zones) {
+export function createRoomState(zones, options = {}) {
+  const tilePx = options.tilePx ?? TILE;
+  const door = options.door ?? DOOR_SLOT;
   /** id -> { from, to, cur, t0, dur, dir, spawning, despawning, despawnT0, meta } */
   const posCache = new Map();
   /** zoneId -> { id: slotIndex } — หน่วยความจำที่นั่งข้าม snapshot (เฉพาะโซน grid ปกติ) */
@@ -109,7 +114,7 @@ export function createRoomState(zones) {
     cache.from = { ...cache.cur };
     cache.to = { ...target };
     cache.t0 = now;
-    const distTiles = Math.hypot(cache.to.x - cache.from.x, cache.to.y - cache.from.y) / TILE;
+    const distTiles = Math.hypot(cache.to.x - cache.from.x, cache.to.y - cache.from.y) / tilePx;
     cache.dur = Math.max(MIN_GLIDE_MS, (distTiles / GLIDE_TILES_PER_SEC) * 1000);
   }
 
@@ -141,13 +146,13 @@ export function createRoomState(zones) {
   }
 
   function placeEntity(char, slot, zoneRole, now) {
-    const target = worldPos(slot);
+    const target = worldPos(slot, tilePx);
     const meta = buildMeta(char, zoneRole);
     let cache = posCache.get(char.id);
     if (!cache) {
       // เกิด: เดินเข้ามาจากประตูเสมอ (spec §7.4) ไม่ใช่ fade-in อยู่กับที่
-      const doorPos = worldPos(DOOR_SLOT);
-      const distTiles = Math.hypot(target.x - doorPos.x, target.y - doorPos.y) / TILE;
+      const doorPos = worldPos(door, tilePx);
+      const distTiles = Math.hypot(target.x - doorPos.x, target.y - doorPos.y) / tilePx;
       cache = {
         from: { ...doorPos },
         to: { ...target },
@@ -216,7 +221,7 @@ export function createRoomState(zones) {
     // ลูป placeEntity() ข้างบนไม่เรียก id นี้แล้ว) เดินออกทางประตูก่อนลบออกจริง
     for (const [id, cache] of posCache) {
       if (!charsById.has(id) && !cache.despawning) {
-        glideTo(cache, worldPos(DOOR_SLOT), now);
+        glideTo(cache, worldPos(door, tilePx), now);
         cache.dur = Math.max(cache.dur, DESPAWN_MS); // ให้เวลาเดินออก+จางหายอย่างน้อย ~1 วินาที
         cache.despawning = true;
         cache.despawnT0 = now;
@@ -228,7 +233,14 @@ export function createRoomState(zones) {
   function getDrawList(now) {
     const list = [];
     for (const [id, cache] of posCache) {
+      // syncCurrent() ตั้ง dur=0 ทันทีที่ leg จบ ⇒ dur>0 หลังเรียก = "ยังเดินอยู่จริง ณ เวลานี้"
       const pos = syncCurrent(cache, now);
+      const moving = cache.dur > 0;
+      // ระหว่างเดินให้หันตามเวกเตอร์การเคลื่อนที่ (spec §7.4) ไม่ใช่ทิศของที่นั่งปลายทาง —
+      // ถึงที่แล้วค่อยกลับไปหันตาม slot.dir ที่ cache.dir เก็บไว้
+      const dir =
+        (moving ? directionFromVector(cache.to.x - cache.from.x, cache.to.y - cache.from.y) : null) ||
+        cache.dir;
       let alpha = 1;
       let scale = 1;
       if (cache.despawning) {
@@ -245,7 +257,19 @@ export function createRoomState(zones) {
         scale = 0.6 + 0.4 * Math.min(1, dt);
         if (dt >= 1) cache.spawning = false;
       }
-      list.push({ id, x: pos.x, y: pos.y, alpha, scale, dir: cache.dir, meta: cache.meta });
+      list.push({
+        id,
+        x: pos.x,
+        y: pos.y,
+        alpha,
+        scale,
+        dir,
+        // `moving` + `animMs` คือทุกอย่างที่ render.js ต้องใช้เลือกท่า/เฟรม (เดิน = walk เล่นวน,
+        // อยู่นิ่ง = ท่าตาม manifest.states เฟรมเดียว) — เวลานับจากจุดเริ่ม leg ปัจจุบัน
+        moving,
+        animMs: Math.max(0, now - cache.t0),
+        meta: cache.meta,
+      });
     }
     list.sort((a, b) => a.y - b.y);
     return list;
