@@ -166,11 +166,14 @@ function isOnBrowser(id, browserQueue) {
 }
 
 /**
- * derive โซน/บทบาทของตัวละครหนึ่งตัว — ตรงกับ spec §7.3 ทุกตัวอักษร
+ * derive โซน/บทบาทของตัวละครหนึ่งตัว — ตรงกับ spec §7.3 (โครงเงื่อนไข P1–P9 ทุกตัวอักษร)
+ * บวก `deadlineAt` แนบมากับผู้รอคิว (P4) ที่ดึงจาก `browserQueue.waiting[].deadlineAt` เท่านั้น
+ * (ไม่ใช่ `char.deadlineAt` ที่ต้องเป็น null เสมอสำหรับเคสนี้ตาม spec §4.1 ข้อ 2) — จำเป็นสำหรับให้
+ * นาฬิกาถอยหลังของ Run ที่รอคิว Browser ทำงานได้ตาม §5.6 โดยยังคงกติกา "แหล่งเดียว" ของ browserQueue
  * ลำดับตรงกับ precedence P1–P9 ของ §5.2: โซน browser derive จาก browserQueue แหล่งเดียว
  * ไม่ใช่จาก char.state (กัน state สองที่ drift กัน)
  * @param {{id:string,state:string}} char
- * @param {{holder:string|null, waiting:{id:string}[]}} browserQueue
+ * @param {{holder:string|null, waiting:{id:string, deadlineAt?:number|null}[]}} browserQueue
  */
 export function zoneAndRoleFor(char, browserQueue) {
   if (char.state === "stopped") return { zone: "stopped" }; // P1 / P7
@@ -179,7 +182,11 @@ export function zoneAndRoleFor(char, browserQueue) {
   }
   if (browserQueue.holder === char.id) return { zone: "browser", role: "holder" }; // P3
   const i = browserQueue.waiting.findIndex((w) => w.id === char.id);
-  if (i !== -1) return { zone: "browser", role: "waiter", queuePos: i + 1 }; // P4
+  if (i !== -1) {
+    // deadlineAt มาจาก browserQueue.waiting[].deadlineAt เท่านั้น (แหล่งเดียวตาม spec §4.1 ข้อ 2) —
+    // char.deadlineAt ต้องเป็น null เสมอสำหรับตัวละครที่รอคิว Browser (ทั้ง Task และ Run) ห้ามอ่านจากที่นั่น
+    return { zone: "browser", role: "waiter", queuePos: i + 1, deadlineAt: browserQueue.waiting[i].deadlineAt ?? null }; // P4
+  }
   if (char.state === "working") return { zone: "desks" }; // P5 / P6
   if (char.state === "failed") return { zone: "bug" }; // P8
   return { zone: "lounge" }; // P9 (idle และอื่น ๆ ที่ไม่เข้าเงื่อนไขไหน)

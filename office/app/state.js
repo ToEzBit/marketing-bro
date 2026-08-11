@@ -124,6 +124,9 @@ export function createRoomState(zones) {
       detail: char.detail ?? null,
       since: char.since,
       deadlineAt: char.deadlineAt ?? null,
+      // เส้นตายที่ derive จาก browserQueue.waiting[] (P4) — แยกจาก deadlineAt ข้างบนซึ่งเป็นค่าดิบจาก
+      // snapshot (ต้องเป็น null เสมอตอนรอคิว Browser ตาม spec §4.1 ข้อ 2) ใช้เฉพาะตอน Run รอคิว (§5.6)
+      browserDeadlineAt: zoneRole.deadlineAt ?? null,
       threadId: char.threadId ?? null,
       threadUrl: char.threadUrl ?? null,
       workspace: char.workspace ?? null,

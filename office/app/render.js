@@ -38,13 +38,20 @@ export function formatDuration(ms) {
 
 /**
  * ตัดสินว่าตัวละครนี้ควรนับถอยหลังหรือนับขึ้น (spec §5.6):
- * ถอยหลังเฉพาะโซน Approval และ Run ที่รอคิว Browser (มี deadlineAt เท่านั้น) — ที่เหลือนับขึ้น
+ * ถอยหลังเฉพาะโซน Approval (จาก `meta.deadlineAt` — ค่าจริงจาก snapshot) และ Run ที่รอคิว Browser
+ * (จาก `meta.browserDeadlineAt` ที่ derive จาก `browserQueue.waiting[].deadlineAt` เท่านั้น — ห้ามอ่าน
+ * `meta.deadlineAt` ตรงนี้เพราะ backend ส่ง `null` เสมอสำหรับเคสนี้ตาม spec §4.1 ข้อ 2) ที่เหลือนับขึ้น
+ * (Task ที่รอคิว Browser มี `browserDeadlineAt: null` เสมอตาม ADR 0006 → นับขึ้นเหมือนกรณีทั่วไป)
  */
 export function getClockInfo(meta, hostNowMs) {
   const isApproval = meta.state === "approval";
-  const isRunBrowserWaiter = meta.kind === "run" && meta.zone === "browser" && meta.role === "waiter";
-  if ((isApproval || isRunBrowserWaiter) && meta.deadlineAt != null) {
+  if (isApproval && meta.deadlineAt != null) {
     const remaining = meta.deadlineAt - hostNowMs;
+    return { text: formatDuration(remaining), countdown: true, overdue: remaining <= 0 };
+  }
+  const isRunBrowserWaiter = meta.kind === "run" && meta.zone === "browser" && meta.role === "waiter";
+  if (isRunBrowserWaiter && meta.browserDeadlineAt != null) {
+    const remaining = meta.browserDeadlineAt - hostNowMs;
     return { text: formatDuration(remaining), countdown: true, overdue: remaining <= 0 };
   }
   return { text: formatDuration(hostNowMs - meta.since), countdown: false, overdue: false };
@@ -81,7 +88,9 @@ export function createRenderer({ canvas, zones, assets }) {
   setupCanvas();
 
   // ---- เฟอร์นิเจอร์/ของประดับต่อโซน (วาดเสมอ ไม่ขึ้นกับว่ามีคนอยู่ไหม) ----
-  function drawDesk(cx, cy, now) {
+  // หมายเหตุ: ห้ามมี effect ที่ขึ้นกับเวลา (พัลส์/หมุน) นอกโซน Approval (spec §7.4) — จอมอนิเตอร์นี้
+  // จึงเป็นสีนิ่ง ไม่ใช่ไฟกะพริบ
+  function drawDesk(cx, cy) {
     ctx.fillStyle = "#5b4327";
     ctx.fillRect(cx * TILE - 20, cy * TILE - 30, 40, 18);
     ctx.strokeStyle = "#2c2116";
@@ -89,8 +98,7 @@ export function createRenderer({ canvas, zones, assets }) {
     ctx.strokeRect(cx * TILE - 20, cy * TILE - 30, 40, 18);
     ctx.fillStyle = "#111318";
     ctx.fillRect(cx * TILE - 8, cy * TILE - 40, 16, 11);
-    const glow = 0.5 + 0.5 * Math.sin(now / 500 + cx);
-    ctx.fillStyle = `rgba(120,200,255,${0.25 + glow * 0.35})`;
+    ctx.fillStyle = "rgba(120,200,255,0.45)";
     ctx.fillRect(cx * TILE - 6, cy * TILE - 38, 12, 7);
   }
   function drawSofa(cx, cy) {
@@ -109,11 +117,10 @@ export function createRenderer({ canvas, zones, assets }) {
     ctx.lineWidth = 2;
     ctx.stroke();
   }
-  function drawScreenProp(cx, cy, now) {
+  function drawScreenProp(cx, cy) {
     ctx.fillStyle = "#111318";
     ctx.fillRect(cx * TILE - 14, cy * TILE - 26, 28, 20);
-    const glow = 0.5 + 0.5 * Math.sin(now / 400);
-    ctx.fillStyle = `rgba(139,108,255,${0.35 + glow * 0.35})`;
+    ctx.fillStyle = "rgba(139,108,255,0.55)";
     ctx.fillRect(cx * TILE - 11, cy * TILE - 23, 22, 14);
   }
   function drawCracks(rect) {
@@ -214,10 +221,10 @@ export function createRenderer({ canvas, zones, assets }) {
   }
 
   function drawDecorations(now) {
-    drawApprovalSpotlight(now);
-    for (const s of zones.desks.slots) drawDesk(s.x, s.y, now);
+    drawApprovalSpotlight(now); // effect ที่ขึ้นกับเวลา (พัลส์/หมุน) มีได้เฉพาะจุดนี้จุดเดียว (spec §7.4)
+    for (const s of zones.desks.slots) drawDesk(s.x, s.y);
     for (const s of zones.lounge.slots) drawSofa(s.x, s.y);
-    drawScreenProp(zones.browser.holderSlot.x, zones.browser.holderSlot.y, now);
+    drawScreenProp(zones.browser.holderSlot.x, zones.browser.holderSlot.y);
     drawCracks(zones.bug.rect);
     drawBarrier(zones.stopped.rect);
   }
@@ -400,16 +407,16 @@ export function createRenderer({ canvas, zones, assets }) {
     ]);
   }
 
-  function drawAutoPausedMarkers(markers, now) {
+  // ป้าย/marker ของ Schedule auto-pause — สีนิ่ง ไม่พัลส์ (เอฟเฟกต์ที่ขึ้นกับเวลามีได้เฉพาะโซน Approval, spec §7.4)
+  function drawAutoPausedMarkers(markers) {
     const hitboxes = [];
     const [bx, by] = zones.bug.rect;
     markers.forEach((m, i) => {
       const cx = (bx + 0.9 + i * 1.7) * TILE;
       const cy = (by + 0.7) * TILE;
-      const pulse = 0.5 + 0.5 * Math.sin(now / 700 + i);
       ctx.beginPath();
       ctx.arc(cx, cy, 12, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(213,60,60,${0.55 + pulse * 0.2})`;
+      ctx.fillStyle = "rgba(213,60,60,0.65)";
       ctx.fill();
       ctx.strokeStyle = "rgba(255,255,255,.6)";
       ctx.lineWidth = 1.5;
@@ -481,7 +488,7 @@ export function createRenderer({ canvas, zones, assets }) {
       ctx.globalAlpha = 1;
     }
 
-    const scheduleHitboxes = drawAutoPausedMarkers(autoPausedSchedules || [], t);
+    const scheduleHitboxes = drawAutoPausedMarkers(autoPausedSchedules || []);
     return [...hitboxes, ...scheduleHitboxes];
   }
 
