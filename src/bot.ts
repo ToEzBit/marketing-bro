@@ -36,6 +36,10 @@ import {
 import { CLEAR_SKILL, registerCommands } from "./discord/commands.js";
 import { requestApproval } from "./discord/approval.js";
 import { ThreadReporter, describeTool, truncate, type Postable } from "./discord/render.js";
+import { OutcomeFeed, type OutcomeStatus } from "./office/feed.js";
+import { startOfficeUi } from "./office/server.js";
+import { assembleSnapshot, runCharacterId } from "./office/snapshot.js";
+import type { OfficeServerHandle, OfficeSnapshot } from "./office/types.js";
 import { sweepOrphans } from "./orphan-sweep.js";
 import { describeRecurrence, nextFireAt, parseRecurrence } from "./recurrence.js";
 import {
@@ -121,6 +125,22 @@ export class Bot {
    * matches the old behaviour where the approval lived on the session.
    */
   private readonly browserApproved = new Set<string>();
+  /**
+   * Last outcomes, for the Office UI room to keep showing a Task/Run that has
+   * already left the register (spec §5.5). In-memory, bounded and never
+   * persisted — the durable history is the Discord thread. Written from the
+   * five end-of-work points below and read only by {@link officeSnapshot};
+   * nothing in the bot's hot paths touches it.
+   */
+  private readonly outcomeFeed = new OutcomeFeed();
+  /** The Office UI server while it is up — undefined when OFFICE_UI_PORT is unset or it failed to bind. */
+  private officeUi: OfficeServerHandle | undefined;
+  /**
+   * Set the moment shutdown starts, so an `openOfficeUi()` still waiting on
+   * `listen` cannot hand back a live server after everything else is gone —
+   * an unclaimed HTTP server would keep the event loop (and the process) alive.
+   */
+  private shuttingDown = false;
 
   constructor(private readonly config: Config) {
     this.store = new TaskStore(config.sessionStatePath);
@@ -219,12 +239,23 @@ export class Bot {
     );
     this.scheduler.start();
     console.log(`[bot] scheduler started with ${this.scheduleStore.all().length} schedule(s)`);
+    // Last, and only when configured: the Office UI is an optional read-only
+    // view (ADR 0002), so nothing the bot actually does waits behind it.
+    await this.openOfficeUi();
   }
 
   async shutdown(): Promise<void> {
     console.log("[bot] shutting down…");
+    this.shuttingDown = true;
     if (this.idleSweeper) clearInterval(this.idleSweeper);
     this.scheduler.stop();
+    // Before client.destroy() (spec §3.5): stops the poll and keepalive timers
+    // and destroys every hanging SSE socket, so an open page cannot keep the
+    // process alive after this resolves.
+    if (this.officeUi) {
+      await this.officeUi.close();
+      this.officeUi = undefined;
+    }
     await Promise.allSettled([
       this.sessions.closeAll(),
       ...[...this.transientSessions].map((session) => session.close()),
@@ -1037,6 +1068,9 @@ export class Bot {
       thread = await this.fetchScheduleThread(record);
     } catch (error) {
       console.error(`[bot] schedule ${record.id} has nowhere to run:`, error);
+      // Office UI, write point 5 of 5 (spec §5.5): with no thread to post in,
+      // the room is the only place this round can be seen at all.
+      this.recordRunOutcome(record, "failed", "หาเธรดของ schedule ไม่เจอ");
       return "failure";
     }
 
@@ -1047,6 +1081,10 @@ export class Bot {
     // Set when the round gave up waiting for the browser at its deadline —
     // the agent still ends its turn gracefully, but the round is a failure.
     let browserDeadlineHit = false;
+    // Short "why" for the Office UI room only (spec §5.5) — the thread already
+    // got the full text. First writer wins: the earliest failure is the cause,
+    // and a later wrap-up turn ending fine must not erase it.
+    let failureReason: string | undefined;
     const session = new AgentSession(
       {
         workspace: record.workspace,
@@ -1112,12 +1150,14 @@ export class Bot {
           // Only a turn that ran to the end counts; a Run stopped part-way
           // (shutdown, say) produced no finished work, so it is not a success.
           ok = summary.status === "ok";
+          if (summary.status !== "ok") failureReason ??= summary.errors?.join("\n");
           await reporter.clearStatus();
           await reporter.say(formatSummary(summary));
         },
         onFatal: async (error) => {
           ok = false;
           const detail = error instanceof Error ? error.message : String(error);
+          failureReason ??= detail;
           console.error(`[bot] scheduled run ${record.id} died:`, error);
           await reporter.clearStatus();
           await reporter.say(`❌ รอบนี้ล้มเหลว: ${truncate(detail, 1500)}`);
@@ -1130,6 +1170,7 @@ export class Bot {
       await session.send(withSkill(record.prompt, record.skill ?? null));
     } catch (error) {
       ok = false;
+      failureReason ??= error instanceof Error ? error.message : String(error);
       console.error(`[bot] scheduled run ${record.id} failed:`, error);
       await reporter.clearStatus();
     } finally {
@@ -1137,7 +1178,16 @@ export class Bot {
       this.releaseBrowser(requester);
       await session.close();
     }
-    return ok && !browserDeadlineHit ? "success" : "failure";
+    const succeeded = ok && !browserDeadlineHit;
+    // Office UI, write point 4 of 5 (spec §5.5). The deadline is the real cause
+    // whenever it was hit: the agent wraps up politely afterwards, so its own
+    // turn usually ends "ok" and carries no reason worth showing.
+    this.recordRunOutcome(
+      record,
+      succeeded ? "ok" : "failed",
+      browserDeadlineHit ? "รอคิว browser ไม่ทันเวลารอบถัดไป" : failureReason,
+    );
+    return succeeded ? "success" : "failure";
   }
 
   /** Routes a follow-up message in a task thread into that thread's session. */
@@ -1305,6 +1355,18 @@ export class Bot {
         // The agent closes its browser window before the turn ends, so the
         // whole-bot lock frees here; the task's approval stays for follow-ups.
         this.releaseBrowser(record.threadId);
+        // Office UI, write point 1 of 5 (spec §5.5): "ok" clears this thread's
+        // ghost, anything else leaves one for the room to keep showing. Gated
+        // on `persist` because `/ask` shares these hooks and is not a
+        // character (spec §1.1) — its `ask:<id>` thread does not exist.
+        if (persist) {
+          this.recordTaskOutcome({
+            reporter,
+            record,
+            status: summary.status,
+            reason: summary.errors?.join("\n"),
+          });
+        }
         await reporter.clearStatus();
         await reporter.say(formatSummary(summary));
       },
@@ -1314,6 +1376,12 @@ export class Bot {
         onDead?.();
         this.releaseBrowser(record.threadId);
         this.browserApproved.delete(record.threadId);
+        // Office UI, write point 2 of 5 (spec §5.5): a session that died while
+        // resuming is recoverable by typing again, so it walks out of the room
+        // quietly instead of landing in the failure zone (spec §5.3).
+        if (persist && !wasResuming) {
+          this.recordTaskOutcome({ reporter, record, status: "failed", reason: detail });
+        }
         await reporter.clearStatus();
 
         if (wasResuming && persist) {
@@ -1333,6 +1401,14 @@ export class Bot {
   private async reportSessionFailure(live: LiveSession, error: unknown): Promise<void> {
     const detail = error instanceof Error ? error.message : String(error);
     console.error("[bot] session error:", error);
+    // Office UI, write point 3 of 5 (spec §5.5): the prompt never got through,
+    // so no turn ever ends and points 1–2 will never fire for this Task.
+    this.recordTaskOutcome({
+      reporter: live.reporter,
+      record: live.record,
+      status: "failed",
+      reason: detail,
+    });
     await live.reporter.clearStatus();
     await live.reporter.say(`❌ งานล้มเหลว: ${detail}`);
   }
@@ -1367,6 +1443,143 @@ export class Bot {
   private releaseBrowser(requester: string): void {
     this.browserQueue.cancelWaiting(requester);
     this.browserQueue.release(requester);
+  }
+
+  // ————————————————————————————————————————————————————————————————
+  // Office UI (spec of the "Office UI" effort) — read-only throughout (ADR
+  // 0002). Nothing below is reachable from Discord, and nothing above is
+  // reachable from the page: the only link between them is the outcome feed
+  // written at the five end-of-work points, and the snapshot read here.
+  // ————————————————————————————————————————————————————————————————
+
+  /**
+   * Feed write for a Task (spec §5.5 points 1–3). Synchronous, allocation-only
+   * and unable to throw, so it drops between two statements of an existing
+   * hook without moving anything around it.
+   */
+  private recordTaskOutcome(args: {
+    reporter: ThreadReporter;
+    record: TaskRecord;
+    status: OutcomeStatus;
+    reason?: string;
+  }): void {
+    const { reporter, record, status, reason } = args;
+    this.outcomeFeed.record({
+      id: record.threadId,
+      kind: "task",
+      // The reporter knows the thread it posts in; the id is the last resort.
+      name: reporter.threadName || record.threadId,
+      threadId: record.threadId,
+      ...(reporter.threadUrl ? { threadUrl: reporter.threadUrl } : {}),
+      workspace: record.workspace,
+      model: record.model,
+      status,
+      ...(reason ? { reason } : {}),
+      endedAt: Date.now(),
+    });
+  }
+
+  /**
+   * Feed write for a Run (spec §5.5 points 4–5). The id must go through
+   * {@link runCharacterId}: a bare schedule id would not match the live Run's
+   * character key, and the assembler's dedupe would quietly stop working,
+   * leaving a ghost standing next to the round that is still going.
+   */
+  private recordRunOutcome(
+    record: ScheduleRecord,
+    status: OutcomeStatus,
+    reason?: string,
+  ): void {
+    const thread = this.describeThread(record.threadId);
+    this.outcomeFeed.record({
+      id: runCharacterId(record.id),
+      kind: "run",
+      name: thread.name ?? record.id,
+      threadId: record.threadId,
+      ...(thread.url ? { threadUrl: thread.url } : {}),
+      workspace: record.workspace,
+      model: record.model,
+      status,
+      ...(reason ? { reason } : {}),
+      endedAt: Date.now(),
+    });
+  }
+
+  /**
+   * A thread's name and link straight out of discord.js's cache. **Never
+   * fetches**: the assembler runs on every poll (once a second) and must stay
+   * synchronous — a miss just means a card without a link, which the page
+   * already renders (spec §6.6).
+   */
+  private describeThread(threadId: string): { name?: string; url?: string } {
+    const channel = this.client.channels.cache.get(threadId);
+    if (!channel) return {};
+    // Threads and text channels carry both; DMs and partials may carry neither.
+    const known = channel as Partial<{ name: string; guildId: string }>;
+    return {
+      ...(known.name ? { name: known.name } : {}),
+      ...(known.guildId
+        ? { url: `https://discord.com/channels/${known.guildId}/${threadId}` }
+        : {}),
+    };
+  }
+
+  /**
+   * Everything the room shows, gathered from the live objects and handed to the
+   * assembler. Called by the server once a second, so it stays synchronous and
+   * side-effect free — bar the feed's own pruning of expired entries, which
+   * spec §2 item 2 allows as its housekeeping.
+   */
+  private officeSnapshot(): OfficeSnapshot {
+    const now = Date.now();
+    return assembleSnapshot({
+      now,
+      approvalTimeoutMs: this.config.approvalTimeoutMs,
+      sessions: this.sessions.entries(),
+      runs: this.scheduler.runningIds().flatMap((id) => {
+        const record = this.scheduleStore.get(id);
+        const since = this.scheduler.runningSince(id);
+        // Both come off the scheduler's own map, so this only ever drops a
+        // round whose schedule was deleted mid-flight. `since` must never fall
+        // back to `now`: a value that moves every poll would make the server's
+        // diff (spec §3.4) differ every second and broadcast forever.
+        if (!record || since === undefined) return [];
+        const session = this.scheduleRuns.get(id);
+        return [{ id, since, record, ...(session ? { session } : {}) }];
+      }),
+      browserQueue: {
+        ...(this.browserQueue.holder !== undefined ? { holder: this.browserQueue.holder } : {}),
+        ...(this.browserQueue.heldSince !== undefined
+          ? { heldSince: this.browserQueue.heldSince }
+          : {}),
+        waiting: this.browserQueue.waitingDetail(),
+      },
+      feed: this.outcomeFeed.entries(now),
+      schedules: this.scheduleStore.all(),
+      describeThread: (threadId) => this.describeThread(threadId),
+    });
+  }
+
+  /**
+   * Brings the page up when `OFFICE_UI_PORT` is set (spec §3.2, §3.5). Unset
+   * means off with nothing allocated at all: no server, no timer, not even a
+   * snapshot taken. `startOfficeUi` never throws and answers `undefined` when
+   * the port cannot be bound, so a busy port costs the bot nothing — Discord
+   * is the real channel and this page is an extra.
+   */
+  private async openOfficeUi(): Promise<void> {
+    const port = this.config.officeUiPort;
+    if (port === undefined) return;
+    const handle = await startOfficeUi({ port, snapshot: () => this.officeSnapshot() });
+    if (!handle) return;
+    // shutdown() can have run to the end while listen() was still pending. A
+    // server nobody holds a handle to would keep the process alive for good.
+    if (this.shuttingDown) {
+      await handle.close();
+      return;
+    }
+    this.officeUi = handle;
+    console.log(`[office] Office UI ที่ http://127.0.0.1:${handle.port}`);
   }
 }
 
