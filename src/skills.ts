@@ -115,3 +115,22 @@ export function withSkill(prompt: string, skillName: string | null): string {
   if (!skillName) return prompt;
   return `ใช้สกิล "${skillName}" ทำงานนี้:\n\n${prompt}`;
 }
+
+/** Matches exactly what withSkill writes, so the two can never drift apart. */
+const BAKED_SKILL = /^ใช้สกิล "([^"\n]+)" ทำงานนี้:\r?\n\r?\n/;
+
+/**
+ * The inverse of withSkill. Schedules created before `skill` became a field of
+ * its own stored the instruction baked into the prompt, which left no way to
+ * edit prompt and skill apart from each other — `/schedule edit prompt:…`
+ * would drop the skill, and `skill:…` would stack a second instruction on top
+ * of the first. ScheduleStore.load() runs every record through this, so from
+ * startup onward there is one representation and the edit path never has to
+ * know a legacy shape existed. A prompt with no such prefix comes back
+ * untouched, with no skill.
+ */
+export function unbakeSkill(prompt: string): { prompt: string; skill?: string } {
+  const match = BAKED_SKILL.exec(prompt);
+  if (!match) return { prompt };
+  return { prompt: prompt.slice(match[0].length), skill: match[1]! };
+}

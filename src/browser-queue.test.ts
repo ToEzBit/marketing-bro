@@ -201,6 +201,94 @@ await check("acquiring before the deadline stops the deadline from firing later"
   assert.equal(queue.holder, "schedule:s1");
 });
 
+await check("waiting reports who is in line, in the order they will be served", async () => {
+  const queue = new BrowserQueue();
+  await queue.acquire("task-a");
+  assert.deepEqual(queue.waiting, [], "the holder is not one of the waiters");
+
+  void queue.acquire("task-b");
+  void queue.acquire("schedule:s1");
+  await settle(5);
+  assert.deepEqual(queue.waiting, ["task-b", "schedule:s1"]);
+
+  queue.release("task-a");
+  await settle(5);
+  // task-b took the browser, so only the schedule is still in line.
+  assert.equal(queue.holder, "task-b");
+  assert.deepEqual(queue.waiting, ["schedule:s1"]);
+});
+
+console.log("\nthe timings behind the line (heldSince / waitingDetail)");
+
+await check("heldSince follows the browser as it changes hands", async () => {
+  const queue = new BrowserQueue();
+  assert.equal(queue.heldSince, undefined, "nobody holds it yet");
+
+  await queue.acquire("task-a");
+  const heldByA = queue.heldSince;
+  assert.equal(typeof heldByA, "number");
+
+  await settle(5);
+  await queue.acquire("task-a");
+  assert.equal(queue.heldSince, heldByA, "the holder asking again is one hold, not a new one");
+  void queue.acquire("task-b");
+  await settle(5);
+  assert.equal(queue.heldSince, heldByA, "someone joining the line does not touch the holder");
+
+  queue.release("task-a");
+  await settle(5);
+  assert.equal(queue.holder, "task-b");
+  assert.ok(queue.heldSince! > heldByA!, "the hand-over starts task-b's own clock");
+
+  queue.release("task-b");
+  assert.equal(queue.heldSince, undefined, "a browser nobody holds has nothing to time");
+});
+
+await check("waitingDetail is the same line as waiting, with since and the armed deadline", async () => {
+  const queue = new BrowserQueue();
+  await queue.acquire("task-a");
+  assert.deepEqual(queue.waitingDetail(), [], "the holder is not one of the waiters");
+
+  const before = Date.now();
+  const deadlineAt = before + 60_000;
+  void queue.acquire("task-b");
+  void queue.acquire("schedule:s1", { deadlineAt });
+  await settle(5);
+
+  const detail = queue.waitingDetail();
+  assert.deepEqual(
+    detail.map((waiter) => waiter.requester),
+    queue.waiting,
+    "same requesters, same FIFO order",
+  );
+  assert.ok(detail[0]!.since >= before && detail[0]!.since <= Date.now());
+  // A Task waits as long as it takes (ADR 0006); only a Schedule brings a
+  // deadline, and it is the value the timer was armed with — nothing recomputed.
+  assert.equal(detail[0]?.deadlineAt, undefined);
+  assert.equal(detail[1]?.deadlineAt, deadlineAt);
+
+  queue.release("task-a");
+  await settle(5);
+  assert.deepEqual(
+    queue.waitingDetail().map((waiter) => waiter.requester),
+    ["schedule:s1"],
+    "task-b took the browser and left the line",
+  );
+});
+
+await check("a waiter that gave up is gone from waitingDetail too", async () => {
+  const queue = new BrowserQueue();
+  await queue.acquire("task-a");
+  const abort = new AbortController();
+  const waiting = queue.acquire("task-b", { signal: abort.signal });
+  await settle(5);
+  assert.equal(queue.waitingDetail().length, 1);
+
+  abort.abort();
+  assert.equal(await waiting, "cancelled");
+  assert.deepEqual(queue.waitingDetail(), []);
+});
+
 if (failures > 0) {
   console.error(`\n${failures} browser-queue test(s) failed`);
   process.exit(1);

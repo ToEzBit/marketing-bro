@@ -13,6 +13,13 @@ export const MODEL_CHOICES = [
 ] as const;
 
 /**
+ * Reserved `skill:` value meaning "run with no skill at all". Only
+ * `/schedule edit` needs it: there an omitted option already means "leave this
+ * field as it is", so removing a skill needs a value of its own to say it.
+ */
+export const CLEAR_SKILL = "-";
+
+/**
  * The Skill picker (ADR 0005). Autocomplete, not fixed choices: the bot
  * answers each keystroke by reading the skills folder live, so a freshly
  * dropped skill shows up without re-registering anything with Discord.
@@ -106,6 +113,52 @@ export function buildCommands(): RESTPostAPIApplicationCommandsJSONBody[] {
             .setDescription("มอบสิทธิ์ใช้ browser (บัญชีที่ล็อกอินค้าง) ให้งานนี้ตอนรันอัตโนมัติ"),
         )
         .addStringOption(skillOption),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("edit")
+        .setDescription("แก้ schedule เดิมโดยไม่เสียเธรดและประวัติ (ช่องที่ไม่ระบุ = คงเดิม)")
+        .addStringOption((option) =>
+          option.setName("id").setDescription("id จาก /schedule list").setRequired(true),
+        )
+        .addStringOption((option) =>
+          option
+            .setName("prompt")
+            .setDescription("สิ่งที่ให้ทำทุกรอบ (แทนที่ของเดิมทั้งหมด)")
+            .setMaxLength(1800),
+        )
+        .addStringOption((option) =>
+          option
+            .setName("every")
+            .setDescription("รอบเวลาใหม่ เช่น 30m, 2h หรือ 3d (เป็นวันต้องใส่ at ด้วย)"),
+        )
+        .addStringOption((option) =>
+          option
+            .setName("at")
+            .setDescription("เวลายิงใหม่แบบ 24 ชม. เช่น 08:00 (ใส่เดี่ยว ๆ = ทุกวัน)"),
+        )
+        .addStringOption((option) =>
+          option
+            .setName("days")
+            .setDescription("วันในสัปดาห์ใหม่ เช่น mon,wed,fri (ต้องใส่ at ด้วย)"),
+        )
+        .addStringOption((option) =>
+          option.setName("path").setDescription("ย้ายโฟลเดอร์ที่ทำงาน"),
+        )
+        .addStringOption((option) =>
+          option.setName("model").setDescription("เปลี่ยนโมเดล").addChoices(...MODEL_CHOICES),
+        )
+        .addBooleanOption((option) =>
+          option
+            .setName("browser")
+            .setDescription("ให้หรือถอนสิทธิ์ browser ของรอบอัตโนมัติ"),
+        )
+        .addStringOption((option) =>
+          option
+            .setName("skill")
+            .setDescription(`เปลี่ยนสกิล (เลือก "${CLEAR_SKILL}" = เอาสกิลออก)`)
+            .setAutocomplete(true),
+        ),
     )
     .addSubcommand((sub) =>
       sub.setName("list").setDescription("ดู schedule ทั้งหมด"),

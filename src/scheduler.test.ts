@@ -4,10 +4,15 @@
  * skip instead of pile up, never back-fill, auto-pause after repeated failures.
  */
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ScheduleStore, type ScheduleRecord } from "./schedule-store.js";
+import { withSkill } from "./skills.js";
+import {
+  applyScheduleEdit,
+  ScheduleStore,
+  type ScheduleRecord,
+} from "./schedule-store.js";
 import {
   MAX_CONSECUTIVE_FAILURES,
   Scheduler,
@@ -296,6 +301,135 @@ await check("fireNow reports an unknown id", async () => {
   const h = await harness();
   const result = await h.scheduler.fireNow("nope");
   assert.equal(result.started, false);
+});
+
+// ------------------------------------------------------------ /schedule edit
+
+await check("an omitted field is left as it is, never reset to a default", async () => {
+  const h = await harness({
+    workspace: "/tmp/marketing",
+    model: "opus",
+    browserGrant: true,
+  });
+  const changes = applyScheduleEdit(h.record, { prompt: "งานใหม่" }, T0);
+
+  // The summary carries the new text, so the thread records what the schedule
+  // now does — not merely that something about it changed.
+  assert.deepEqual(changes, ["📝 prompt ใหม่: งานใหม่"]);
+  assert.equal(h.record.prompt, "งานใหม่");
+  // The fields the caller never mentioned — a grant reset here would be a
+  // silent permission change (ADR 0004).
+  assert.equal(h.record.browserGrant, true);
+  assert.equal(h.record.model, "opus");
+  assert.equal(h.record.workspace, "/tmp/marketing");
+  assert.deepEqual(h.record.recurrence, { kind: "interval", everyMs: 30 * MIN });
+});
+
+await check("a new recurrence recomputes nextRunAt off the creation anchor", async () => {
+  const h = await harness();
+  const now = new Date(T0.getTime() + 45 * MIN);
+  const changes = applyScheduleEdit(
+    h.record,
+    { recurrence: { kind: "interval", everyMs: 120 * MIN } },
+    now,
+  );
+
+  assert.deepEqual(changes, ["🔁 ทุก 2 ชั่วโมง"]);
+  // Anchored at createdAt (10:00), so the 2h grid lands on 12:00 — not 12:45.
+  assert.equal(h.record.nextRunAt, new Date(T0.getTime() + 120 * MIN).toISOString());
+});
+
+await check("editing a paused schedule leaves it paused and its failures counted", async () => {
+  const h = await harness({ paused: true, consecutiveFailures: 2 });
+  applyScheduleEdit(h.record, { model: "haiku", browserGrant: true }, T0);
+
+  // Waking a schedule and forgiving its failures belong to /schedule resume.
+  assert.equal(h.record.paused, true);
+  assert.equal(h.record.consecutiveFailures, 2);
+  assert.equal(h.record.model, "haiku");
+});
+
+await check("values identical to the current ones report no change", async () => {
+  const h = await harness({ model: "sonnet", browserGrant: false });
+  const changes = applyScheduleEdit(
+    h.record,
+    { model: "sonnet", browserGrant: false, recurrence: { kind: "interval", everyMs: 30 * MIN } },
+    T0,
+  );
+  assert.deepEqual(changes, []);
+});
+
+await check("a skill can be cleared, and clearing an absent one changes nothing", async () => {
+  const h = await harness({ skill: "trend-scout" });
+  assert.deepEqual(applyScheduleEdit(h.record, { skill: null }, T0), ["🧩 เอาสกิลออก"]);
+  assert.equal(h.record.skill, undefined);
+  assert.deepEqual(applyScheduleEdit(h.record, { skill: null }, T0), []);
+});
+
+await check("a legacy record's baked-in skill is split back out on load", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "sched-legacy-"));
+  const path = join(dir, "schedules.json");
+  const legacy = {
+    id: "legacy",
+    ownerId: "owner",
+    channelId: "chan",
+    threadId: "thread",
+    // What create wrote before `skill` was a field of its own.
+    prompt: withSkill("หาเทรนด์ใหม่", "trend-scout"),
+    workspace: "/tmp/ws",
+    model: "sonnet",
+    recurrence: { kind: "interval", everyMs: 30 * MIN },
+    browserGrant: false,
+    paused: false,
+    consecutiveFailures: 0,
+    createdAt: T0.toISOString(),
+    nextRunAt: new Date(T0.getTime() + 30 * MIN).toISOString(),
+  };
+  await writeFile(path, JSON.stringify([legacy]), "utf8");
+
+  const store = new ScheduleStore(path);
+  await store.load();
+  const record = store.get("legacy")!;
+  assert.equal(record.prompt, "หาเทรนด์ใหม่");
+  assert.equal(record.skill, "trend-scout");
+
+  // The bug this normalisation exists for: editing the prompt of a legacy
+  // record used to drop its skill, and setting a skill used to stack a second
+  // instruction on top of the baked-in one.
+  applyScheduleEdit(record, { prompt: "หาเทรนด์ TikTok" }, T0);
+  const sent = withSkill(record.prompt, record.skill ?? null);
+  assert.equal(sent.match(/ใช้สกิล/g)?.length, 1);
+  assert.match(sent, /หาเทรนด์ TikTok/);
+});
+
+// ------------------------------------------------- the rounds in flight now
+
+await check("runningIds and runningSince match the round that is actually running", async () => {
+  const h = await harness();
+  h.setOutcome("hang");
+  assert.deepEqual(h.scheduler.runningIds(), [], "nothing has fired yet");
+  assert.equal(h.scheduler.runningSince(h.record.id), undefined);
+
+  const firedAt = new Date(T0.getTime() + 30 * MIN);
+  h.setNow(firedAt);
+  await h.scheduler.tick();
+  await until(() => h.runs.length === 1);
+
+  assert.deepEqual(h.scheduler.runningIds(), [h.record.id]);
+  assert.equal(h.scheduler.runningSince(h.record.id), firedAt.getTime());
+  assert.equal(h.scheduler.isRunning(h.record.id), true, "the old answer is unchanged");
+  assert.equal(h.scheduler.runningSince("nope"), undefined);
+});
+
+await check("a round that finished is out of runningIds again", async () => {
+  const h = await harness();
+  h.setNow(new Date(T0.getTime() + 30 * MIN));
+  await h.scheduler.tick();
+  await until(() => h.runs.length === 1);
+  await until(() => !h.scheduler.isRunning(h.record.id));
+
+  assert.deepEqual(h.scheduler.runningIds(), []);
+  assert.equal(h.scheduler.runningSince(h.record.id), undefined);
 });
 
 if (failures > 0) {

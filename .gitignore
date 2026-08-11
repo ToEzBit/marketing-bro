@@ -8,3 +8,6 @@ dist/
 
 # worktrees ของ agent ระหว่างพัฒนา
 .claude/worktrees/
+
+# Office UI: ชุด asset ที่ Operator วางเอง (license ไม่แน่นอน ห้าม commit) — ดู office/assets/default/README.md
+office/assets/custom/

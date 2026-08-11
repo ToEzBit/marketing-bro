@@ -59,10 +59,19 @@ function fakeMessage(content: string): FakeMessage {
   return message;
 }
 
-/** Stands in for a thread: only send() is exercised by the status-message path. */
-function fakeThread(): Postable & { sent: FakeMessage[] } {
+/**
+ * Stands in for a thread: send() is what the status-message path exercises,
+ * and the identity fields are what the read-only getters report.
+ */
+function fakeThread(
+  identity: Partial<{ id: string; name: string; guildId: string | undefined }> = {},
+): Postable & { sent: FakeMessage[] } {
   const sent: FakeMessage[] = [];
   const thread = {
+    id: "thread-1",
+    name: "เธรดของ Task",
+    guildId: "guild-1",
+    ...identity,
     sent,
     send: async (content: unknown) => {
       const text =
@@ -140,6 +149,38 @@ await check("clearStatus with nothing to clear never fires the hook", async () =
 
   await reporter.clearStatus();
   assert.deepEqual(seen, []);
+});
+
+console.log("\nwhat the reporter can be asked about its thread (read-only getters)");
+
+await check("threadName and threadUrl come straight from the channel", async () => {
+  const thread = fakeThread({ id: "1417", name: "แก้บั๊ก /status", guildId: "999" });
+  const reporter = new ThreadReporter(thread);
+
+  assert.equal(reporter.threadName, "แก้บั๊ก /status");
+  assert.equal(reporter.threadUrl, "https://discord.com/channels/999/1417");
+  assert.equal(thread.sent.length, 0, "asking costs no Discord call");
+});
+
+await check("a channel whose guild is unknown has no link", async () => {
+  const reporter = new ThreadReporter(fakeThread({ guildId: undefined }));
+  assert.equal(reporter.threadUrl, undefined, "no link beats a link that goes nowhere");
+});
+
+await check("currentHeadline is the last headline set, and empty once cleared", async () => {
+  const thread = fakeThread();
+  const reporter = new ThreadReporter(thread);
+  assert.equal(reporter.currentHeadline, "", "nothing has been set yet");
+
+  reporter.setHeadline("กำลังคิด");
+  // Readable at once: the status message itself is debounced, this is not.
+  assert.equal(reporter.currentHeadline, "กำลังคิด");
+  reporter.setHeadline("กำลังใช้ Bash");
+  assert.equal(reporter.currentHeadline, "กำลังใช้ Bash");
+
+  await until(() => thread.sent.length === 1);
+  await reporter.clearStatus();
+  assert.equal(reporter.currentHeadline, "", "the turn is over, so there is nothing to show");
 });
 
 if (failures > 0) {

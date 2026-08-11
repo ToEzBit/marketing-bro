@@ -20,6 +20,8 @@ export type AcquireOptions = {
 type Waiter = {
   requester: string;
   options: AcquireOptions;
+  /** When this requester joined the line. */
+  since: number;
   resolve: (outcome: AcquireOutcome) => void;
   /** Last position reported through onWait, so a waiter only hears changes. */
   notifiedPosition?: number;
@@ -29,11 +31,38 @@ type Waiter = {
 
 export class BrowserQueue {
   private current: string | undefined;
+  private currentSince: number | undefined;
   private readonly waiters: Waiter[] = [];
 
   /** Who holds the browser right now, if anyone. */
   get holder(): string | undefined {
     return this.current;
+  }
+
+  /** Requesters still in line, in the order they will be served. For `/status`. */
+  get waiting(): string[] {
+    return this.waiters.map((waiter) => waiter.requester);
+  }
+
+  /** When the current holder got the browser; undefined while nobody holds it. */
+  get heldSince(): number | undefined {
+    return this.currentSince;
+  }
+
+  /**
+   * The line with the timings behind it: since when each requester has been
+   * waiting, and the deadline it is actually armed with — the value handed to
+   * {@link acquire}, not one recomputed from a schedule's next round, which
+   * moves on every tick and can be rewritten by `/schedule edit`.
+   */
+  waitingDetail(): { requester: string; since: number; deadlineAt?: number }[] {
+    return this.waiters.map((waiter) => ({
+      requester: waiter.requester,
+      since: waiter.since,
+      ...(waiter.options.deadlineAt !== undefined
+        ? { deadlineAt: waiter.options.deadlineAt }
+        : {}),
+    }));
   }
 
   /**
@@ -43,6 +72,9 @@ export class BrowserQueue {
    */
   acquire(requester: string, options: AcquireOptions = {}): Promise<AcquireOutcome> {
     if (this.current === undefined || this.current === requester) {
+      // The holder asking again is one hold, not a new one, so the clock only
+      // starts when the browser actually changes hands.
+      if (this.current === undefined) this.currentSince = Date.now();
       this.current = requester;
       return Promise.resolve("acquired");
     }
@@ -50,7 +82,13 @@ export class BrowserQueue {
       return Promise.resolve("deadline");
     }
     return new Promise((resolve) => {
-      const waiter: Waiter = { requester, options, resolve, cleanup: () => undefined };
+      const waiter: Waiter = {
+        requester,
+        options,
+        since: Date.now(),
+        resolve,
+        cleanup: () => undefined,
+      };
 
       const leave = (outcome: AcquireOutcome) => {
         const index = this.waiters.indexOf(waiter);
@@ -92,10 +130,12 @@ export class BrowserQueue {
     if (next) {
       next.cleanup();
       this.current = next.requester;
+      this.currentSince = Date.now();
       next.resolve("acquired");
       this.notifyPositions();
     } else {
       this.current = undefined;
+      this.currentSince = undefined;
     }
   }
 

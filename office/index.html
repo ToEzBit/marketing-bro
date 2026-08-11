@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Office UI</title>
+<link rel="icon" href="data:," />
+<link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+
+<header>
+  <h1>🏢 Office UI</h1>
+  <span class="sub">ห้องพิกเซลของบอท — ดูอย่างเดียว สั่งงานไม่ได้ (การสั่งงานยังผ่าน Discord เท่านั้น)</span>
+  <span id="connStatus" class="conn-status conn-ok">เชื่อมต่ออยู่</span>
+</header>
+
+<main>
+  <div class="stage">
+    <canvas id="room" aria-label="ห้อง office แสดงสถานะ Task/Run ปัจจุบัน"></canvas>
+    <div id="disconnectedOverlay" class="disconnected-overlay" hidden>
+      <div class="disconnected-box">
+        <div class="disconnected-icon">📡</div>
+        <div>ขาดการเชื่อมต่อกับบอท</div>
+        <div class="disconnected-sub">ห้องค้างภาพล่าสุดไว้ให้ — จะกลับมาเองเมื่อเชื่อมต่อได้ใหม่</div>
+      </div>
+    </div>
+  </div>
+
+  <aside class="panel">
+    <section>
+      <h2>Legend — 6 โซน</h2>
+      <div class="legend-row"><span class="swatch" style="background:#5aa9e6"></span>💤 ว่าง — lounge</div>
+      <div class="legend-row"><span class="swatch" style="background:#9096a3"></span>⏸ ถูกสั่งหยุด — stopped</div>
+      <div class="legend-row"><span class="swatch" style="background:#f5b83d"></span>✋ รอ Approval — approval</div>
+      <div class="legend-row"><span class="swatch" style="background:#4caf7d"></span>💻 กำลังทำงาน — desks</div>
+      <div class="legend-row"><span class="swatch" style="background:#8b6cff"></span>🌐 ถือ/รอคิว Browser — browser</div>
+      <div class="legend-row"><span class="swatch" style="background:#e5484d"></span>🐞 ล้มเหลว — bug</div>
+      <div class="legend-note">
+        คลิกตัวละครหรือป้าย Schedule เพื่อดูรายละเอียด (การ์ดอ่านอย่างเดียว)<br>
+        Run (Schedule) หน้าตาเหมือน Task ทุกประการ แยกได้จากชื่อในการ์ดเท่านั้น
+      </div>
+    </section>
+
+    <section class="infocard" id="infocard" hidden>
+      <button class="close-btn" id="btnCloseCard" type="button" aria-label="ปิดการ์ด">✕</button>
+      <h2>ข้อมูล</h2>
+      <div id="cardBody"></div>
+    </section>
+  </aside>
+</main>
+
+<footer>
+  หน้านี้อ่านอย่างเดียว — ไม่มี <code>&lt;form&gt;</code> ไม่มี <code>fetch()</code> ที่ไม่ใช่ GET ไม่มี WebSocket
+  ลิงก์เดียวที่กดออกได้คือลิงก์ไปเธรด Discord (เปิดแท็บใหม่)
+</footer>
+
+<script type="module" src="./app/main.js"></script>
+</body>
+</html>

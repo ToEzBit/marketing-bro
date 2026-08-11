@@ -34,10 +34,11 @@
  */
 import assert from "node:assert/strict";
 import { tmpdir } from "node:os";
-import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import type { CanUseTool, PermissionResult, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import {
   AgentSession,
   type AgentStream,
+  type SessionHooks,
   type TurnSummary,
 } from "./agent-session.js";
 import { formatSummary } from "./bot.js";
@@ -117,13 +118,28 @@ type Harness = {
   session: AgentSession;
   stream: ScriptedStream;
   summaries: TurnSummary[];
+  /**
+   * The permission callback the session handed the SDK — the way a tool call
+   * reaches it in production. Calling it directly is how these tests stand in
+   * for a tool the policy escalated.
+   */
+  canUseTool: CanUseTool;
   /** Ends the scripted stream and closes the session. */
   finish: () => Promise<void>;
 };
 
-function startSession(): Harness {
+/** The hooks a test cares about; everything else keeps its silent default. */
+type HarnessOptions = {
+  decide?: SessionHooks["decide"];
+  onApprovalNeeded?: SessionHooks["onApprovalNeeded"];
+};
+
+function startSession(overrides: HarnessOptions = {}): Harness {
   const stream = new ScriptedStream();
   const summaries: TurnSummary[] = [];
+  // The executor of the SDK query runs synchronously in the constructor, so
+  // this is set before any test can reach for it.
+  let canUseTool!: CanUseTool;
   const session = new AgentSession(
     { workspace: tmpdir(), model: "sonnet", oauthToken: "" },
     {
@@ -132,8 +148,9 @@ function startSession(): Harness {
       onHeadline: () => undefined,
       onSessionId: () => undefined,
       onFatal: (error) => console.error("  unexpected onFatal:", error),
-      decide: () => ({ action: "deny", reason: "no tool calls in these tests" }),
-      onApprovalNeeded: async () => ({ behavior: "deny", message: "not used here" }),
+      decide: overrides.decide ?? (() => ({ action: "deny", reason: "no tool calls in these tests" })),
+      onApprovalNeeded:
+        overrides.onApprovalNeeded ?? (async () => ({ behavior: "deny", message: "not used here" })),
       onSendFile: async () => undefined,
       onTurnEnd: (summary) => {
         summaries.push(summary);
@@ -143,6 +160,7 @@ function startSession(): Harness {
       // A real query stops iterating when the session aborts it; close() waits
       // for the pump, so the scripted stream has to do the same.
       options.abortController?.signal.addEventListener("abort", () => stream.end());
+      canUseTool = options.canUseTool!;
       return stream;
     },
   );
@@ -150,11 +168,20 @@ function startSession(): Harness {
     session,
     stream,
     summaries,
+    canUseTool,
     finish: async () => {
       stream.end();
       await session.close();
     },
   };
+}
+
+let nextToolUseId = 1;
+
+/** The context the SDK passes a permission request; only the signal is read. */
+function toolContext(signal = new AbortController().signal): Parameters<CanUseTool>[2] {
+  const id = `tool-${nextToolUseId++}`;
+  return { signal, toolUseID: id, requestId: id };
 }
 
 /**
@@ -390,6 +417,199 @@ await check("a failure with nothing but diagnostics points at the Host log", asy
   assert.match(text, /⚠️/);
   assert.doesNotMatch(text, /ede_diagnostic/);
   assert.match(text, /log ฝั่ง Host/, "the Member is told where the detail lives");
+  await finish();
+});
+
+console.log("\nwhat the session can be asked about itself (read-only getters)");
+
+await check("isStopping is true only while a running turn is being stopped", async () => {
+  const { session, stream, finish } = startSession();
+  assert.equal(session.isStopping, false, "a fresh session is not stopping");
+  assert.equal(session.isClosed, false);
+
+  const sending = session.send("งานยาว");
+  await stream.emit(assistantText("เริ่มแล้ว"));
+  assert.equal(session.isStopping, false, "busy, but nobody asked it to stop");
+
+  await session.interrupt();
+  assert.equal(session.isStopping, true);
+  assert.equal(typeof session.stopRequestedAt, "number", "the clock counts up from here");
+
+  await stream.emit(resultAfterInterrupt());
+  await sending;
+  assert.equal(session.isStopping, false, "the turn is over — nothing is being stopped");
+  assert.equal(session.stopRequestedAt, undefined);
+
+  await finish();
+  assert.equal(session.isClosed, true);
+});
+
+await check("a /stop while idle is not a session being stopped", async () => {
+  // The flag stays set for the next turn, but nothing is being stopped: this
+  // session is simply idle, and reading the flag alone would say otherwise.
+  const { session, finish } = startSession();
+  await session.interrupt();
+  assert.equal(session.isBusy, false);
+  assert.equal(session.isStopping, false);
+  await finish();
+});
+
+await check("startedAt and turnStartedAt frame the turn", async () => {
+  const { session, stream, finish } = startSession();
+  assert.ok(session.startedAt <= Date.now());
+  // Read into a local before asserting it away: asserting on the getter itself
+  // would narrow its type for the rest of this test.
+  const betweenTurns = session.turnStartedAt;
+  assert.equal(betweenTurns, undefined, "no turn is running yet");
+
+  const sending = session.send("ทำงานหน่อย");
+  const turnStartedAt = session.turnStartedAt;
+  assert.equal(typeof turnStartedAt, "number");
+  assert.ok(turnStartedAt! >= session.startedAt);
+
+  await stream.emit(assistantText("กำลังทำ"));
+  assert.equal(session.turnStartedAt, turnStartedAt, "same turn, same clock");
+
+  await stream.emit(resultSuccess());
+  await sending;
+  assert.equal(session.turnStartedAt, undefined, "the turn is over");
+  await finish();
+});
+
+await check("lastTurn keeps how the last turn ended, and when", async () => {
+  const { session, stream, summaries, finish } = startSession();
+  const beforeAnyTurn = session.lastTurn;
+  assert.equal(beforeAnyTurn, undefined, "no turn has ended yet");
+
+  const first = session.send("งานแรก");
+  await stream.emit(assistantText("รับทราบ"));
+  await stream.emit(resultSuccess());
+  await first;
+  assert.deepEqual(session.lastTurn?.summary, summaries[0]);
+  assert.equal(session.lastTurn?.summary.status, "ok");
+  const firstEndedAt = session.lastTurn!.endedAt;
+  assert.ok(firstEndedAt <= Date.now());
+
+  // The room shows the latest outcome, not a log: a second turn replaces it.
+  const second = session.send("งานที่พัง");
+  await stream.emit(assistantText("ลองดู"));
+  await stream.emit(resultFailure(["Claude Code process exited with code 1"]));
+  await second;
+  assert.equal(session.lastTurn?.summary.status, "failed");
+  assert.ok(session.lastTurn!.endedAt >= firstEndedAt);
+  await finish();
+});
+
+console.log("\napprovals waiting on a human");
+
+/** An approval the test answers by hand, the way a human answers one. */
+function heldApproval(): {
+  onApprovalNeeded: SessionHooks["onApprovalNeeded"];
+  answer: (result: PermissionResult) => void;
+} {
+  let answer: (result: PermissionResult) => void = () => undefined;
+  const answered = new Promise<PermissionResult>((resolve) => {
+    answer = resolve;
+  });
+  return { onApprovalNeeded: () => answered, answer: (result) => answer(result) };
+}
+
+const escalate: SessionHooks["decide"] = () => ({ action: "ask", reason: "risky command" });
+
+await check("a tool waiting on a human is listed, and gone once it is allowed", async () => {
+  const held = heldApproval();
+  const { session, canUseTool, finish } = startSession({
+    decide: escalate,
+    onApprovalNeeded: held.onApprovalNeeded,
+  });
+  const askedNobodyYet = session.pendingApprovals;
+  assert.deepEqual(askedNobodyYet, [], "nothing has been asked yet");
+
+  const before = Date.now();
+  const deciding = canUseTool("Bash", { command: "rm -rf build" }, toolContext());
+  await settle();
+
+  const pending = session.pendingApprovals;
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0]?.toolName, "Bash");
+  assert.deepEqual(pending[0]?.input, { command: "rm -rf build" });
+  assert.ok(pending[0]!.since >= before, "the approval's own clock starts when it is asked");
+
+  held.answer({ behavior: "allow" });
+  await deciding;
+  assert.deepEqual(session.pendingApprovals, [], "answered — it leaves the list");
+  await finish();
+});
+
+await check("a denied approval leaves the list too", async () => {
+  const held = heldApproval();
+  const { session, canUseTool, finish } = startSession({
+    decide: escalate,
+    onApprovalNeeded: held.onApprovalNeeded,
+  });
+  const deciding = canUseTool("Bash", { command: "rm -rf /" }, toolContext());
+  await settle();
+  assert.equal(session.pendingApprovals.length, 1);
+
+  held.answer({ behavior: "deny", message: "ไม่อนุมัติ" });
+  assert.deepEqual(await deciding, { behavior: "deny", message: "ไม่อนุมัติ" });
+  assert.deepEqual(session.pendingApprovals, []);
+  await finish();
+});
+
+await check("parallel tool calls each get their own entry", async () => {
+  // Why this is a list and not one slot: the agent can call several tools at
+  // once, and the second must not overwrite the first.
+  const held = heldApproval();
+  const { session, canUseTool, finish } = startSession({
+    decide: escalate,
+    onApprovalNeeded: held.onApprovalNeeded,
+  });
+  const first = canUseTool("Bash", { command: "rm -rf build" }, toolContext());
+  const second = canUseTool("WebFetch", { url: "https://example.com" }, toolContext());
+  await settle();
+
+  assert.deepEqual(
+    session.pendingApprovals.map((entry) => entry.toolName),
+    ["Bash", "WebFetch"],
+    "oldest first",
+  );
+
+  held.answer({ behavior: "allow" });
+  await Promise.all([first, second]);
+  assert.deepEqual(session.pendingApprovals, []);
+  await finish();
+});
+
+await check("an approval killed by the tool call's abort leaves the list as well", async () => {
+  // The path a plain `const result = await …` would leak: the approval never
+  // gets an answer at all, it dies with the tool call it belongs to.
+  const { session, canUseTool, finish } = startSession({
+    decide: escalate,
+    onApprovalNeeded: (request) =>
+      new Promise((_resolve, reject) => {
+        request.signal.addEventListener("abort", () => reject(new Error("aborted")), {
+          once: true,
+        });
+      }),
+  });
+  const abort = new AbortController();
+  const deciding = canUseTool("Bash", { command: "sleep 999" }, toolContext(abort.signal));
+  await settle();
+  assert.equal(session.pendingApprovals.length, 1);
+
+  abort.abort();
+  await assert.rejects(deciding as Promise<unknown>, /aborted/);
+  assert.deepEqual(session.pendingApprovals, [], "the removal runs on every way out");
+  await finish();
+});
+
+await check("a tool the policy settles itself never shows up as waiting", async () => {
+  const { session, canUseTool, finish } = startSession({
+    decide: () => ({ action: "allow", reason: "read-only" }),
+  });
+  await canUseTool("Read", { file_path: "/tmp/x" }, toolContext());
+  assert.deepEqual(session.pendingApprovals, [], "nobody was ever asked");
   await finish();
 });
 
