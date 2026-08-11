@@ -1,0 +1,260 @@
+{
+  "v": 1,
+  "now": 1754467200000,
+  "sessions": [
+    {
+      "id": "1417000000000001",
+      "kind": "task",
+      "state": "idle",
+      "detail": null,
+      "name": "ถามเรื่องราคาโฮสติ้ง",
+      "headline": null,
+      "threadId": "1417000000000001",
+      "threadUrl": "https://discord.com/channels/1300000000000000001/1417000000000001",
+      "since": 1754466480000,
+      "deadlineAt": null,
+      "workspace": "/Users/operator/workspaces/marketing-bro",
+      "model": "sonnet",
+      "approvals": [],
+      "outcome": null
+    },
+    {
+      "id": "1417000000000009",
+      "kind": "task",
+      "state": "idle",
+      "detail": null,
+      "name": "เช็คสถานะ deploy ล่าสุด",
+      "headline": null,
+      "threadId": "1417000000000009",
+      "threadUrl": "https://discord.com/channels/1300000000000000001/1417000000000009",
+      "since": 1754465700000,
+      "deadlineAt": null,
+      "workspace": "/Users/operator/workspaces/marketing-bro",
+      "model": "sonnet",
+      "approvals": [],
+      "outcome": null
+    },
+    {
+      "id": "1417000000000002",
+      "kind": "task",
+      "state": "working",
+      "detail": null,
+      "name": "แก้บั๊กหน้าแรก /status",
+      "headline": "กำลังใช้ Bash",
+      "threadId": "1417000000000002",
+      "threadUrl": "https://discord.com/channels/1300000000000000001/1417000000000002",
+      "since": 1754467110000,
+      "deadlineAt": null,
+      "workspace": "/Users/operator/workspaces/marketing-bro",
+      "model": "sonnet",
+      "approvals": [],
+      "outcome": null
+    },
+    {
+      "id": "1417000000000012",
+      "kind": "task",
+      "state": "working",
+      "detail": null,
+      "name": "เขียนเทสต์ browser-queue",
+      "headline": "กำลังรัน npm test",
+      "threadId": "1417000000000012",
+      "threadUrl": "https://discord.com/channels/1300000000000000001/1417000000000012",
+      "since": 1754467180000,
+      "deadlineAt": null,
+      "workspace": "/Users/operator/workspaces/marketing-bro",
+      "model": "opus",
+      "approvals": [],
+      "outcome": null
+    },
+    {
+      "id": "1417000000000003",
+      "kind": "task",
+      "state": "approval",
+      "detail": null,
+      "name": "ลบไฟล์ log เก่าที่ค้างอยู่",
+      "headline": "กำลังคิด",
+      "threadId": "1417000000000003",
+      "threadUrl": "https://discord.com/channels/1300000000000000001/1417000000000003",
+      "since": 1754467020000,
+      "deadlineAt": 1754467620000,
+      "workspace": "/Users/operator/workspaces/marketing-bro",
+      "model": "sonnet",
+      "approvals": [
+        {
+          "tool": "Bash",
+          "summary": "`rm -rf build/`",
+          "since": 1754467020000,
+          "deadlineAt": 1754467620000
+        },
+        {
+          "tool": "Write",
+          "summary": "เขียนทับ `deploy.sh`",
+          "since": 1754467020000,
+          "deadlineAt": 1754467620000
+        }
+      ],
+      "outcome": null
+    },
+    {
+      "id": "1417000000000004",
+      "kind": "task",
+      "state": "approval",
+      "detail": null,
+      "name": "อัปโหลดไฟล์แนบผ่านเบราว์เซอร์",
+      "headline": "กำลังคิด",
+      "threadId": "1417000000000004",
+      "threadUrl": "https://discord.com/channels/1300000000000000001/1417000000000004",
+      "since": 1754467160000,
+      "deadlineAt": 1754467760000,
+      "workspace": "/Users/operator/workspaces/marketing-bro",
+      "model": "sonnet",
+      "approvals": [
+        {
+          "tool": "browser_file_upload",
+          "summary": "อัปโหลดไฟล์ `report.pdf` เข้าฟอร์ม",
+          "since": 1754467160000,
+          "deadlineAt": 1754467760000
+        }
+      ],
+      "outcome": null
+    },
+    {
+      "id": "1417000000000005",
+      "kind": "task",
+      "state": "working",
+      "detail": null,
+      "name": "ค้นราคาคู่แข่งจากเว็บ",
+      "headline": "กำลังรอคิว Browser",
+      "threadId": "1417000000000005",
+      "threadUrl": "https://discord.com/channels/1300000000000000001/1417000000000005",
+      "since": 1754467140000,
+      "deadlineAt": null,
+      "workspace": "/Users/operator/workspaces/marketing-bro",
+      "model": "sonnet",
+      "approvals": [],
+      "outcome": null
+    },
+    {
+      "id": "1417000000000007",
+      "kind": "task",
+      "state": "stopped",
+      "detail": "กำลังหยุด",
+      "name": "ทดลอง prompt ใหม่ (ยกเลิกกลางทาง)",
+      "headline": null,
+      "threadId": "1417000000000007",
+      "threadUrl": "https://discord.com/channels/1300000000000000001/1417000000000007",
+      "since": 1754467192000,
+      "deadlineAt": null,
+      "workspace": "/Users/operator/workspaces/marketing-bro",
+      "model": "sonnet",
+      "approvals": [],
+      "outcome": null
+    },
+    {
+      "id": "1417000000000006",
+      "kind": "task",
+      "state": "failed",
+      "detail": "เครื่องมือรันไม่สำเร็จ",
+      "name": "sync ข้อมูลสต็อกกับ Sheet",
+      "headline": null,
+      "threadId": "1417000000000006",
+      "threadUrl": "https://discord.com/channels/1300000000000000001/1417000000000006",
+      "since": 1754466960000,
+      "deadlineAt": null,
+      "workspace": "/Users/operator/workspaces/marketing-bro",
+      "model": "sonnet",
+      "approvals": [],
+      "outcome": {
+        "status": "failed",
+        "reason": "เครื่องมือ Bash คืนค่า exit code 1 ระหว่างติดตั้ง dependency",
+        "endedAt": 1754466960000
+      }
+    }
+  ],
+  "scheduleRuns": [
+    {
+      "id": "schedule:sched-daily-export",
+      "kind": "run",
+      "state": "working",
+      "detail": "กำลังเริ่มรอบ",
+      "name": "ส่งออกรายงาน CSV รายวัน",
+      "headline": null,
+      "threadId": "1417000000000105",
+      "threadUrl": "https://discord.com/channels/1300000000000000001/1417000000000105",
+      "since": 1754467170000,
+      "deadlineAt": null,
+      "workspace": "/Users/operator/workspaces/marketing-workspace",
+      "model": "sonnet",
+      "approvals": [],
+      "outcome": null
+    }
+  ],
+  "outcomeFeed": [
+    {
+      "id": "schedule:sched-newsletter",
+      "kind": "run",
+      "state": "failed",
+      "detail": null,
+      "name": "จดหมายข่าวรายสัปดาห์",
+      "headline": null,
+      "threadId": null,
+      "threadUrl": null,
+      "since": 1754466840000,
+      "deadlineAt": null,
+      "workspace": "/Users/operator/workspaces/marketing-workspace",
+      "model": "sonnet",
+      "approvals": [],
+      "outcome": {
+        "status": "failed",
+        "reason": "รอคิว browser ไม่ทันเวลารอบถัดไป",
+        "endedAt": 1754466840000
+      }
+    },
+    {
+      "id": "1417000000000011",
+      "kind": "task",
+      "state": "stopped",
+      "detail": null,
+      "name": "แก้บั๊ก /status timeout",
+      "headline": null,
+      "threadId": "1417000000000011",
+      "threadUrl": "https://discord.com/channels/1300000000000000001/1417000000000011",
+      "since": 1754467155000,
+      "deadlineAt": null,
+      "workspace": "/Users/operator/workspaces/marketing-bro",
+      "model": "sonnet",
+      "approvals": [],
+      "outcome": {
+        "status": "interrupted",
+        "reason": "ผู้ใช้กด /stop กลางทาง",
+        "endedAt": 1754467155000
+      }
+    }
+  ],
+  "browserQueue": {
+    "holder": "1417000000000004",
+    "heldSince": 1754467110000,
+    "waiting": [
+      {
+        "id": "1417000000000005",
+        "since": 1754467140000,
+        "deadlineAt": null
+      },
+      {
+        "id": "schedule:sched-daily-export",
+        "since": 1754467170000,
+        "deadlineAt": 1754467245000
+      }
+    ]
+  },
+  "autoPausedSchedules": [
+    {
+      "id": "a1c9",
+      "name": "สรุปยอดขายรายวัน",
+      "threadId": "1417000000000099",
+      "threadUrl": "https://discord.com/channels/1300000000000000001/1417000000000099",
+      "consecutiveFailures": 3,
+      "nextRunAt": 1754470800000
+    }
+  ]
+}
