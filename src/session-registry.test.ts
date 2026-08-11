@@ -384,6 +384,70 @@ await check("a session that stops being idle mid-sweep is spared", async () => {
   assert.equal(h.registry.size, 1);
 });
 
+console.log("\nlisting every slot, the ones still being built included (entries)");
+
+await check("entries sees a slot that is still being built; values does not", async () => {
+  const h = harness();
+  const slow = h.slowBuild("a");
+  const building = h.registry.getOrCreate("t1", slow.factory);
+  await settle();
+
+  assert.deepEqual(h.registry.values(), [], "nothing is live yet");
+  assert.equal(h.registry.size, 0);
+  const listed = h.registry.entries();
+  assert.equal(listed.length, 1, "someone is already in this thread, mid-build or not");
+  assert.equal(listed[0]?.threadId, "t1");
+  assert.equal(listed[0]?.state, "pending");
+  assert.equal(listed[0]?.entry, undefined, "there is no session to hand out yet");
+
+  slow.release();
+  await building;
+});
+
+await check("since is when the slot was taken, not when the build happened to finish", async () => {
+  const h = harness();
+  const slow = h.slowBuild("a");
+  const building = h.registry.getOrCreate("t1", slow.factory);
+  await settle();
+  const reservedAt = h.registry.entries()[0]!.since;
+
+  slow.release();
+  const entry = await building;
+  const live = h.registry.entries()[0]!;
+  assert.equal(live.state, "live");
+  assert.equal(live.entry, entry, "the live slot hands out the built session");
+  // The build was held open for a settle window, so a re-stamp on going live
+  // would be visible here — and would read as someone arriving twice.
+  assert.equal(live.since, reservedAt);
+});
+
+await check("a build that failed leaves no slot behind to list", async () => {
+  const h = harness();
+  await assert.rejects(
+    h.registry.getOrCreate("t1", () => {
+      throw new Error("discord said no");
+    }),
+    /discord said no/,
+  );
+  assert.deepEqual(h.registry.entries(), []);
+});
+
+await check("entries lists every thread, and a closed one leaves it", async () => {
+  const h = harness();
+  await h.registry.getOrCreate("t1", h.build("a"));
+  await h.registry.getOrCreate("t2", h.build("b"));
+  assert.deepEqual(
+    h.registry.entries().map((slot) => slot.threadId),
+    ["t1", "t2"],
+  );
+
+  await h.registry.close("t1");
+  assert.deepEqual(
+    h.registry.entries().map((slot) => slot.threadId),
+    ["t2"],
+  );
+});
+
 if (failures > 0) {
   console.error(`\n${failures} session-registry test(s) failed`);
   process.exit(1);
