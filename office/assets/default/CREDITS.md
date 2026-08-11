@@ -29,7 +29,7 @@
 | Body — teen | `body/bodies/teen/` | bluecarrot16, Evert, TheraHedwig, Benjamin K. Smith (BenCreating), MuffinElZangano, Durrani, Pierre Vigier (pvigier), Eliza Wyatt (ElizaWy), Matthew Krohn (makrohn), Johannes Sjölund (wulax), Stephen Challener (Redshrike) | OGA-BY 3.0 / CC-BY-SA 3.0 / GPL 3.0 |
 | Head — human/male | `head/heads/human/male/` | bluecarrot16, Benjamin K. Smith (BenCreating), Stephen Challener (Redshrike) | OGA-BY 3.0 / CC-BY-SA 3.0 / GPL 3.0 |
 | Head — human/male_small (ใช้กับตัว teen) | `head/heads/human/male_small/` | Eliza Wyatt (ElizaWy), Stephen Challener (Redshrike) | OGA-BY 3.0 / CC-BY |
-| Legs — formal/male (กางเกงสูท) | `legs/formal/male/` | bluecarrot16, JaidynReiman, Eliza Wyatt (ElizaWy), Johannes Sjölund (wulax), Stephen Challener (Redshrike) | OGA-BY 3.0 / CC-BY-SA 3.0 / GPL 3.0 |
+| Legs — pants/male (กางเกงขายาว) | `legs/pants/male/` | bluecarrot16, JaidynReiman, Eliza Wyatt (ElizaWy), Matthew Krohn (makrohn), Johannes Sjölund (wulax), Stephen Challener (Redshrike) | OGA-BY 3.0 / GPL 3.0 / CC-BY-SA 3.0 |
 | Torso — longsleeve2/male (เสื้อแขนยาว) | `torso/clothes/longsleeve/longsleeve2/male/` | Eliza Wyatt (ElizaWy), JaidynReiman, Stephen Challener (Redshrike), Johannes Sjölund (wulax) | OGA-BY 3.0 |
 | Hair — plain/adult | `hair/plain/adult/` | JaidynReiman, Manuel Riecke (MrBeast), Joe White | OGA-BY 3.0 / CC-BY-SA 3.0 / GPL 3.0 |
 | Hair — buzzcut/adult | `hair/buzzcut/adult/` | Eliza Wyatt (ElizaWy) | OGA-BY 3.0 |
@@ -44,8 +44,14 @@
 
 ### 1.2 คอมโบต่อโฟลเดอร์
 
-ทุกโฟลเดอร์ใช้ legs=formal/male, torso=longsleeve2/male ชุดเดียวกัน (แต่งตัวออฟฟิศ) ต่างกันที่ body/head/hair
-เพื่อให้หน้าตาไม่ซ้ำกันเกินไปโดยไม่ต้องเพิ่มจำนวนไฟล์เครดิต:
+ทุกโฟลเดอร์ใช้ legs=pants/male, torso=longsleeve2/male ชุดเดียวกัน (แต่งตัวออฟฟิศ) ต่างกันที่ body/head/hair
+เพื่อให้หน้าตาไม่ซ้ำกันเกินไปโดยไม่ต้องเพิ่มจำนวนไฟล์เครดิต
+
+หมายเหตุการเลือก legs: ลองใช้ `legs/formal/male/` (กางเกงสูทสีเขียวเข้ม) ก่อน แต่พบว่าไฟล์ `sit.png` ของโฟลเดอร์นั้น
+เป็นคนละสีปาเลตกับ `walk.png`/`idle.png` (สีน้ำตาลอ่อนแทนที่จะเป็นเขียวเข้ม — เป็นความไม่สม่ำเสมอที่มีอยู่แล้วใน
+ไฟล์ต้นทางของ repo ไม่ใช่บั๊กจากการ crop/composite ของเรา) ทำให้ตัวละครเปลี่ยนสีกางเกงกะทันหันตอนสลับท่า
+`sit` (โซนกำลังทำงาน ซึ่งเป็นสถานะที่เจอบ่อยที่สุด) จึงเปลี่ยนไปใช้ `legs/pants/male/` แทน ซึ่งตรวจแล้วว่า
+walk/idle/sit ทั้งสามไฟล์เป็นสีกากีเดียวกันสม่ำเสมอ:
 
 | โฟลเดอร์ | body | head | hair |
 |---|---|---|---|
@@ -90,3 +96,260 @@
 ผสม **CC0 / CC-BY / OGA-BY 3.0 / CC-BY-SA 3.0 / CC-BY-SA 4.0** — ไฟล์ผลลัพธ์ที่ประกอบจากเลเยอร์ CC-BY-SA
 (ตัวละครทุกโฟลเดอร์ และ `room/tileset.png`) ต้องแจกจ่ายต่อภายใต้ **CC-BY-SA** (เงื่อนไข share-alike ของ Creative
 Commons) — ไฟล์ path/แหล่งครบตามตารางข้างบน ใช้ต่อได้แต่ต้องคงเครดิตนี้ไว้
+
+---
+
+## 5. ภาคผนวก — เนื้อหาเต็มของ `CREDITS-walls.txt` / `CREDITS-floors.txt`
+
+`[LPC] Walls` และ `[LPC] Floors` (ผู้ดูแล bluecarrot16) เป็นแพ็กที่รวมผลงานหลายคน/หลายแพ็กย่อยไว้ในชีตเดียว —
+ไฟล์ crop ของเราหยิบมาแค่ 1 tile ต่อแพ็ก แต่ไม่รู้ว่า tile นั้นตกเป็นของสัดส่วนไหนใน "Based on:" ด้านล่าง
+(sheet ไม่แยกเครดิตรายพิกัด) จึงยกไฟล์เครดิตเต็มของทั้งสองแพ็กมาทั้งก้อนไว้ตรงนี้ (แพ็กพี่น้องของผู้ดูแลคนเดียวกัน
+คือ `[LPC] Wooden Furniture` ระบุไว้ชัดว่า "All information in this file must be included" — ยึดตามนั้นเผื่อไว้
+แม้ไฟล์ walls/floors จะไม่ได้เขียนประโยคนี้ตรง ๆ)
+
+### CREDITS-walls.txt
+
+```
+"[LPC] Walls" by bluecarrot16, Lanea Zimmerman (Sharm), Daniel Armstrong (HughSpectrum), William Thompson (William.Thompsonj), Hyptosis, Zabin, Daniel Cook, Guido Bos, SpiderDave, Cougarmint, Stephen Challener (Redshrike), Matthew Nash, Wolthera van Hövell tot Westerflier (TheraHedwig), Reemax, bleutailfly, NaRNeRZz, Sir Spummington, Casper Nilsson, KnoblePersona. CC-BY-SA 3.0.
+
+Based on:
+
+Liberated Pixel Cup (LPC) Base Assets (sprites & map tiles)
+Lanea Zimmerman (Sharm)
+CC-BY 3.0 / CC-BY-SA 3.0 / GPL 3.0
+http://opengameart.org/content/liberated-pixel-cup-lpc-base-assets-sprites-map-tiles
+
+Liberated Pixel Cup (LPC) Base Assets (sprites & map tiles)
+Daniel Armstrong (HughSpectrum)
+CC-BY-SA 3.0 / GPL 3.0
+http://opengameart.org/content/liberated-pixel-cup-lpc-base-assets-sprites-map-tiles#tiles/castlewalls.png
+http://opengameart.org/content/liberated-pixel-cup-lpc-base-assets-sprites-map-tiles#tiles/castlefloors.png
+
+[LPC] Arabic Elements
+Lanea Zimmerman (Sharm), commissioned by William Thompson (William.Thompsonj)
+CC-BY 4.0 / CC-BY 3.0 / GPL 3.0 / GPL 2.0 / OGA-BY 3.0
+https://opengameart.org/content/lpc-arabic-elements
+
+[LPC] Dungeon Elements
+Lanea Zimmerman (Sharm), commissioned by William Thompson (William.Thompsonj)
+CC-BY 4.0 / CC-BY 3.0 / GPL 3.0 / GPL 2.0 / OGA-BY 3.0
+https://opengameart.org/content/lpc-dungeon-elements
+
+[LPC] Adobe Building Set
+Lanea Zimmerman (Sharm), commissioned by William Thompson (William.Thompsonj)
+CC-BY 4.0 / CC-BY 3.0 / GPL 3.0 / GPL 2.0 / OGA-BY 3.0
+https://opengameart.org/content/lpc-adobe-building-set
+
+Castle Tiles for RPG's
+Hyptosis, Zabin, Daniel Cook
+CC-BY 3.0
+http://opengameart.org/content/castle-tiles-for-rpgs
+
+LPC: Interior Castle Tiles
+Lanea Zimmerman (Sharm)
+CC-BY 3.0 / CC-BY-SA 3.0 / GPL 3.0 / OGA-BY 3.0
+https://opengameart.org/content/lpc-interior-castle-tiles
+
+Lots of free 2d tiles and sprites by Hyptosis
+Hyptosis
+CC-BY 3.0
+https://opengameart.org/content/lots-of-free-2d-tiles-and-sprites-by-hyptosis
+
+LPC Compatible Ancient Roman Architecture
+Wolthera van Hövell tot Westerflier (TheraHedwig), Lanea Zimmerman (Sharm)
+CC-BY-SA 3.0 / GPL 3.0
+https://opengameart.org/content/lpc-compatible-ancient-roman-architecture
+
+Flowers, buildings and boxes; Interior wooden tiles; some old castle stuff
+Guido Bos
+CC-BY-SA 3.0 / GPL 3.0
+https://opengameart.org/content/flowers-buildings-and-boxes-interior-wooden-tiles-some-old-castle-stuff
+
+Wallpaper pattern tiles
+SpiderDave
+CC0
+https://opengameart.org/content/wallpaper-pattern-tiles
+
+Wallpaper pattern tiles
+SpiderDave
+CC0
+https://opengameart.org/content/wallpaper-pattern-tiles-0
+
+Patterns and Cursors
+Cougarmint
+CC0
+https://opengameart.org/content/patterns-and-cursors
+
+Patterns and Cursors II
+Cougarmint
+CC0
+https://opengameart.org/content/patterns-and-cursors-ii
+
+RPG Indoor Tileset: Expansion 1
+Redshrike
+CC-BY 3.0 / GPL 3.0 / GPL 2.0 / OGA-BY 3.0
+https://opengameart.org/content/rpg-indoor-tileset-expansion-1
+
+"RPG Enemies; Bathroom Tiles"
+Matthew Nash
+CC-BY-SA 3.0 / GPL 3.0
+https://opengameart.org/content/public-toilet-tileset
+
+Pixel Texture Pack
+jestan
+CC-BY 4.0 / CC-BY 3.0 / CC-BY-SA 4.0 / CC-BY-SA 3.0
+https://opengameart.org/content/pixel-texture-pack
+
+[LPC] House interior and decorations
+Reemax
+CC-BY-SA 3.0 / GPL 3.0 / GPL 2.0
+https://opengameart.org/content/lpc-house-interior-and-decorations
+
+walls and stuff
+bleutailfly
+CC-BY-SA 3.0
+https://opengameart.org/content/walls-and-stuff
+
+Tileset and Characters - Unfinished
+NaRNeRZz
+CC0
+https://opengameart.org/content/tileset-and-characters-unfinished
+
+Adventure Tileset (Unfinished)
+NaRNeRZz
+CC0
+https://opengameart.org/content/adventure-tileset-unfinished
+
+Interior Tiles
+Sir Spummington
+CC-BY-SA 3.0 / GPL 3.0
+https://opengameart.org/content/interior-tiles
+
+LPC C.Nilsson
+Casper Nilsson
+CC-BY-SA 3.0 / GPL 3.0
+https://opengameart.org/content/lpc-cnilsson
+
+Steampunk Level Tileset Mega Pack [Level Tileset] [16x16]
+KnoblePersona
+CC-BY 3.0
+https://opengameart.org/content/steampunk-level-tileset-mega-pack-level-tileset-16x16
+```
+
+### CREDITS-floors.txt
+
+```
+"[LPC] Floors" by bluecarrot16, Lanea Zimmerman (Sharm), William Thompson (William.Thompsonj), Hyptosis, SpiderDave, Cougarmint, Stephen Challener (Redshrike), Bonsaiheldin, Tyler Olsen (Roots), Jetrel, jestan, The Open Surge team (http://opensnc.sourceforge.net), Gaurav Munjal, Reemax, Silveira Neto, bleutailfly, Casper Nilsson, NaRNeRZz, Buch, keith karnage, Arthur Carvalho, Guilherme Vieira (n2liquid), Chris Hamons (maintainer). CC-BY-SA 4.0
+
+Based on:
+
+Liberated Pixel Cup (LPC) Base Assets (sprites & map tiles)
+Lanea Zimmerman (Sharm)
+CC-BY 3.0 / CC-BY-SA 3.0 / GPL 3.0
+http://opengameart.org/content/liberated-pixel-cup-lpc-base-assets-sprites-map-tiles
+
+[LPC] Arabic Elements
+Lanea Zimmerman (Sharm), commissioned by William Thompson (William.Thompsonj)
+CC-BY 4.0 / CC-BY 3.0 / GPL 3.0 / GPL 2.0 / OGA-BY 3.0
+https://opengameart.org/content/lpc-arabic-elements
+
+LPC: Interior Castle Tiles
+Lanea Zimmerman (Sharm)
+CC-BY 3.0 / CC-BY-SA 3.0 / GPL 3.0 / OGA-BY 3.0
+https://opengameart.org/content/lpc-interior-castle-tiles
+
+Lots of free 2d tiles and sprites by Hyptosis
+Hyptosis
+CC-BY 3.0
+https://opengameart.org/content/lots-of-free-2d-tiles-and-sprites-by-hyptosis
+
+Wallpaper pattern tiles
+SpiderDave
+CC0
+https://opengameart.org/content/wallpaper-pattern-tiles
+
+Wallpaper pattern tiles
+SpiderDave
+CC0
+https://opengameart.org/content/wallpaper-pattern-tiles-0
+
+Patterns and Cursors
+Cougarmint
+CC0
+https://opengameart.org/content/patterns-and-cursors
+
+Patterns and Cursors II
+Cougarmint
+CC0
+https://opengameart.org/content/patterns-and-cursors-ii
+
+RPG Indoor Tileset: Expansion 1
+Redshrike
+CC-BY 3.0 / GPL 3.0 / GPL 2.0 / OGA-BY 3.0
+https://opengameart.org/content/rpg-indoor-tileset-expansion-1
+
+Interior Tileset 16x16
+Bonsaiheldin
+CC-BY-SA 3.0
+https://opengameart.org/content/interior-tileset-16x16
+
+Stone Home Interior Tileset
+Tyler Olsen (Roots), Jetrel
+CC-BY-SA 3.0
+https://opengameart.org/content/stone-home-interior-tileset
+
+Pixel Texture Pack
+jestan
+CC-BY 4.0 / CC-BY 3.0 / CC-BY-SA 4.0 / CC-BY-SA 3.0
+https://opengameart.org/content/pixel-texture-pack
+
+32x32 (and 16x16) RPG Tiles--Forest and some Interior Tiles
+Stephen Challener (Redshrike) and the Open Surge team (http://opensnc.sourceforge.net) commissioned by Gaurav Munjal
+CC-BY 3.0
+https://opengameart.org/content/32x32-and-16x16-rpg-tiles-forest-and-some-interior-tiles
+
+[LPC] House interior and decorations
+Reemax
+CC-BY-SA 3.0 / GPL 3.0 / GPL 2.0
+https://opengameart.org/content/lpc-house-interior-and-decorations
+
+OpenPixels:Characters & Tilesets -Silveira Neto
+Silveira Neto
+CC-BY-SA 3.0
+https://opengameart.org/content/openpixelscharacters-tilesets-silveira-neto
+
+walls and stuff
+bleutailfly
+CC-BY-SA 3.0
+https://opengameart.org/content/walls-and-stuff
+
+LPC C.Nilsson
+Casper Nilsson
+CC-BY-SA 3.0 / GPL 3.0
+https://opengameart.org/content/lpc-cnilsson
+
+Adventure Tileset (Unfinished)
+NaRNeRZz
+CC0
+https://opengameart.org/content/adventure-tileset-unfinished
+
+Outdoor 32x32 tileset
+Buch
+CC0
+https://opengameart.org/content/outdoor-32x32-tileset
+
+Medieval town
+keith karnage
+CC-BY 3.0
+https://opengameart.org/content/medieval-town-0
+
+Exterior 32x32 Town tileset
+Arthur Carvalho, copyright Guilherme Vieira (n2liquid)
+CC-BY-SA 4.0
+https://opengameart.org/content/town-tileset-exterior-32x32
+
+Dungeon Crawl 32x32 tiles
+Chris Hamons (maintainer)
+CC0
+https://opengameart.org/content/dungeon-crawl-32x32-tiles
+```
