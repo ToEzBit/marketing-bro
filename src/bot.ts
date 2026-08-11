@@ -107,8 +107,15 @@ export class Bot {
   private readonly transientSessions = new Set<AgentSession>();
   private readonly scheduleStore: ScheduleStore;
   private readonly scheduler: Scheduler;
-  /** In-flight scheduled Runs, by schedule id, so shutdown can close them. */
-  private readonly scheduleRuns = new Map<string, AgentSession>();
+  /**
+   * In-flight scheduled Runs, by schedule id, so shutdown can close them.
+   * The reporter rides along so the Office UI can show a Run's headline —
+   * spec §5 says a Run must look exactly like a Task, headline included.
+   */
+  private readonly scheduleRuns = new Map<
+    string,
+    { session: AgentSession; reporter: ThreadReporter }
+  >();
   private idleSweeper: NodeJS.Timeout | undefined;
   /**
    * The whole-bot Browser queue (ADR 0006). The profile allows one Chrome
@@ -259,7 +266,7 @@ export class Bot {
     await Promise.allSettled([
       this.sessions.closeAll(),
       ...[...this.transientSessions].map((session) => session.close()),
-      ...[...this.scheduleRuns.values()].map((session) => session.close()),
+      ...[...this.scheduleRuns.values()].map(({ session }) => session.close()),
     ]);
     this.transientSessions.clear();
     this.scheduleRuns.clear();
@@ -1164,7 +1171,7 @@ export class Bot {
         },
       },
     );
-    this.scheduleRuns.set(record.id, session);
+    this.scheduleRuns.set(record.id, { session, reporter });
 
     try {
       await session.send(withSkill(record.prompt, record.skill ?? null));
@@ -1544,8 +1551,15 @@ export class Bot {
         // back to `now`: a value that moves every poll would make the server's
         // diff (spec §3.4) differ every second and broadcast forever.
         if (!record || since === undefined) return [];
-        const session = this.scheduleRuns.get(id);
-        return [{ id, since, record, ...(session ? { session } : {}) }];
+        const live = this.scheduleRuns.get(id);
+        return [
+          {
+            id,
+            since,
+            record,
+            ...(live ? { session: live.session, reporter: live.reporter } : {}),
+          },
+        ];
       }),
       browserQueue: {
         ...(this.browserQueue.holder !== undefined ? { holder: this.browserQueue.holder } : {}),

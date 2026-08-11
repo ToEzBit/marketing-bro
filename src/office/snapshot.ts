@@ -146,6 +146,8 @@ export type SnapshotInput = {
     record: ScheduleRecordView;
     /** ยังไม่มีในช่วงแรกของรอบ (ก่อน `AgentSession` ถูกสร้าง) */
     session?: AgentSessionView;
+    /** reporter ของรอบนี้ — มีเพื่อให้ Run มี headline เหมือน Task (spec §5: Run หน้าตาเหมือน Task) */
+    reporter?: ReporterView;
   }[];
   /** สถานะคิว Browser ดิบจาก `BrowserQueue` (`holder` / `heldSince` / `waitingDetail()`) */
   browserQueue: {
@@ -367,8 +369,8 @@ function runCharacter(run: SnapshotInput["runs"][number], input: SnapshotInput):
     state: decision.state,
     detail: decision.detail,
     name: fromCache.name || record.id,
-    // Run ไม่มี `ThreadReporter` ให้อ่าน — `bot.ts` สร้างมันไว้ในสโคปของ `runScheduledOnce` เท่านั้น
-    headline: null,
+    // มีเฉพาะหลัง `runScheduledOnce` สร้าง reporter แล้ว — ช่วงต้นรอบยังเป็น null ตามปกติ
+    headline: run.reporter ? orNull(run.reporter.currentHeadline) : null,
     threadId: record.threadId || null,
     threadUrl: fromCache.url ?? null,
     since: decision.since,

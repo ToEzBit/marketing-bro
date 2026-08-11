@@ -411,6 +411,38 @@ await check("Run ที่ยังไม่มี session → working + กำ�
   assert.equal(character.workspace, "/ws");
 });
 
+await check("Run ที่มี reporter แล้วโชว์ headline เหมือน Task (spec §5: Run หน้าตาเหมือน Task)", async () => {
+  const withHeadline = assembleSnapshot(
+    input({
+      runs: [
+        {
+          id: "sch1",
+          since: NOW - 400,
+          record: schedule(),
+          session: session({ isBusy: true, turnStartedAt: NOW - 300 }),
+          reporter: { threadName: "รอบเช้า", currentHeadline: "กำลังใช้ Bash" },
+        },
+      ],
+    }),
+  );
+  assert.equal(withHeadline.scheduleRuns[0]?.headline, "กำลังใช้ Bash");
+
+  // headline ว่างของ Run ต้องกลายเป็น null เหมือนของ Task ไม่ใช่สตริงเปล่า
+  const blank = assembleSnapshot(
+    input({
+      runs: [
+        {
+          id: "sch1",
+          since: NOW - 400,
+          record: schedule(),
+          reporter: { threadName: "รอบเช้า", currentHeadline: "" },
+        },
+      ],
+    }),
+  );
+  assert.equal(blank.scheduleRuns[0]?.headline, null);
+});
+
 await check("Run ไม่มีทางได้ state approval แม้มีคำขอค้าง (ADR 0004)", async () => {
   const snapshot = assembleSnapshot(
     input({

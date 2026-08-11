@@ -299,7 +299,8 @@ export function startOfficeUi(options: {
 
       const address = server.address() as AddressInfo | null;
       const bound = address?.port ?? port;
-      console.log(`[office] Office UI at http://${HOST}:${bound} (read-only)`);
+      // ไม่ log ตรงนี้: `bot.ts` เป็นคนประกาศว่าเปิดสำเร็จ (ticket #19 ข้อ 4)
+      // ถ้า log ทั้งสองที่ Operator จะเห็นบรรทัดซ้ำสองภาษาทุกครั้งที่บอทขึ้น
       settle({ port: bound, close });
     });
   });
