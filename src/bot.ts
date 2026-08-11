@@ -33,12 +33,17 @@ import {
   decideScheduledBrowser,
   isBrowserTool,
 } from "./policy.js";
-import { registerCommands } from "./discord/commands.js";
+import { CLEAR_SKILL, registerCommands } from "./discord/commands.js";
 import { requestApproval } from "./discord/approval.js";
 import { ThreadReporter, describeTool, truncate, type Postable } from "./discord/render.js";
 import { sweepOrphans } from "./orphan-sweep.js";
 import { describeRecurrence, nextFireAt, parseRecurrence } from "./recurrence.js";
-import { ScheduleStore, type ScheduleRecord } from "./schedule-store.js";
+import {
+  applyScheduleEdit,
+  ScheduleStore,
+  type ScheduleEdit,
+  type ScheduleRecord,
+} from "./schedule-store.js";
 import { SessionRegistry } from "./session-registry.js";
 import { ensureSkillsPlugin, listSkills, withSkill } from "./skills.js";
 import { MAX_CONSECUTIVE_FAILURES, Scheduler, type RunOutcome } from "./scheduler.js";
@@ -314,6 +319,13 @@ export class Bot {
         ),
         value: skill.name.slice(0, 100),
       }));
+    // Only `/schedule edit` can take a skill away, so only it is offered the
+    // way to say so. Listed first: it must stay reachable even when 25 skills
+    // would otherwise fill the picker.
+    if (interaction.options.getSubcommand(false) === "edit") {
+      choices.unshift({ name: "— ไม่ใช้สกิล —", value: CLEAR_SKILL });
+      choices.length = Math.min(choices.length, 25);
+    }
     await interaction.respond(choices);
   }
 
@@ -327,14 +339,40 @@ export class Bot {
   ): Promise<{ ok: true; skill: string | null } | { ok: false }> {
     const skill = interaction.options.getString("skill");
     if (!skill) return { ok: true, skill: null };
-    if (listSkills(this.config.skillsDir).some((entry) => entry.name === skill)) {
-      return { ok: true, skill };
-    }
+    if (this.skillExists(skill)) return { ok: true, skill };
+    await this.replySkillMissing(interaction, skill);
+    return { ok: false };
+  }
+
+  /**
+   * The same option read in `/schedule edit`'s three states: absent leaves the
+   * schedule's skill as it is, CLEAR_SKILL takes it away, anything else
+   * replaces it. resolveSkill cannot serve this — there absence already means
+   * "no skill", which is exactly the state edit must be able to tell apart.
+   */
+  private async resolveSkillEdit(
+    interaction: ChatInputCommandInteraction,
+  ): Promise<{ ok: true; skill?: string | null } | { ok: false }> {
+    const skill = interaction.options.getString("skill");
+    if (skill === null) return { ok: true };
+    if (skill === CLEAR_SKILL) return { ok: true, skill: null };
+    if (this.skillExists(skill)) return { ok: true, skill };
+    await this.replySkillMissing(interaction, skill);
+    return { ok: false };
+  }
+
+  private skillExists(name: string): boolean {
+    return listSkills(this.config.skillsDir).some((entry) => entry.name === name);
+  }
+
+  private async replySkillMissing(
+    interaction: ChatInputCommandInteraction,
+    skill: string,
+  ): Promise<void> {
     await interaction.reply({
       content: `ไม่พบสกิล \`${skill}\` ในโฟลเดอร์ skill แล้ว — เลือกใหม่จากช่อง skill หรือเช็คโฟลเดอร์บนเครื่อง host`,
       flags: MessageFlags.Ephemeral,
     });
-    return { ok: false };
   }
 
   /**
@@ -508,20 +546,53 @@ export class Bot {
     await live.session.interrupt();
   }
 
+  /**
+   * What the bot is doing right now: Task sessions, Runs in flight, and who
+   * holds the Browser. The browser section is the reason this reports even
+   * with no Task open — a Run can hold the browser (or a line of waiters can
+   * be stuck behind it) while no Task session exists at all, and that used to
+   * read as "ไม่มีงานที่กำลังทำอยู่".
+   */
   private async onStatus(interaction: ChatInputCommandInteraction): Promise<void> {
-    if (this.sessions.size === 0) {
-      await interaction.reply({
-        content: "ไม่มีงานที่กำลังทำอยู่",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
+    const holder = this.browserQueue.holder;
+    const waiting = this.browserQueue.waiting;
+    // First, because the whole message is truncated to fit Discord's limit and
+    // a busy bot's task list would otherwise push the one global resource off
+    // the end — the very thing a Member opens /status to see.
+    const sections = [
+      holder === undefined
+        ? "**🌐 Browser** — ว่าง"
+        : [
+            `**🌐 Browser** — ถือโดย ${describeHolder(holder)}`,
+            ...(waiting.length > 0
+              ? [`⏳ คิวรอ ${waiting.length}: ${waiting.map(describeHolder).join(" → ")}`]
+              : []),
+          ].join("\n"),
+    ];
+
+    // scheduler.isRunning, not the scheduleRuns map: a round is marked running
+    // before the bot has fetched its thread and built its session, so the map
+    // is still blind for that first stretch.
+    const runs = this.scheduleStore
+      .all()
+      .filter((record) => this.scheduler.isRunning(record.id))
+      .map((record) => `🟢 \`${record.id}\` <#${record.threadId}> · \`${record.model}\``);
+    if (runs.length > 0) {
+      sections.push([`**รอบ schedule ที่กำลังรัน ${runs.length} รอบ**`, ...runs].join("\n"));
     }
-    const lines = this.sessions.values().map((live) => {
+
+    const tasks = this.sessions.values().map((live) => {
       const state = live.session.isBusy ? "🟢 กำลังทำงาน" : "⚪ ว่าง";
       return `${state} <#${live.record.threadId}> · \`${live.record.workspace}\` · \`${live.record.model}\``;
     });
+    sections.push(
+      tasks.length > 0
+        ? [`**งาน ${tasks.length} งาน**`, ...tasks].join("\n")
+        : "**งาน** — ไม่มีเธรดที่เปิดเซสชันค้างอยู่",
+    );
+
     await interaction.reply({
-      content: [`**งานทั้งหมด ${this.sessions.size} งาน**`, ...lines].join("\n"),
+      content: truncate(sections.join("\n\n"), 1900),
       flags: MessageFlags.Ephemeral,
     });
   }
@@ -533,8 +604,9 @@ export class Bot {
         "",
         "🧵 `/task prompt:…` — สั่งงานหลัก: บอทเปิดเธรดให้ (1 งาน = 1 เธรด) พิมพ์ในเธรดเพื่อคุยต่อ/สั่งเพิ่มได้เรื่อย ๆ — พิมพ์ระหว่างที่กำลังทำงาน = แทรกคำสั่ง บอทติด 👀 ให้",
         "❓ `/ask prompt:…` — คำถามสั้น ๆ ตอบในห้องเดิม ไม่เปิดเธรด ไม่เก็บบริบท อ่าน/ค้นได้อย่างเดียว แก้เครื่องไม่ได้",
-        "⏰ `/schedule create prompt:… every:2h` (หรือ `at:08:00`) — งานรันซ้ำเองตามรอบ · จัดการด้วย `/schedule list | run | pause | resume | delete` — pause คือเบรกฉุกเฉิน กดได้ทุกคน",
-        "🛑 `/stop` — หยุดงานในเธรดนั้น · 📊 `/status` — ดูงานที่กำลังรันทั้งหมด",
+        "⏰ `/schedule create prompt:… every:2h` (หรือ `at:08:00`) — งานรันซ้ำเองตามรอบ · จัดการด้วย `/schedule list | run | edit | pause | resume | delete` — pause คือเบรกฉุกเฉิน กดได้ทุกคน",
+        "✏️ `/schedule edit id:… [prompt:…] [every:…] [model:…] [browser:…]` — แก้ของเดิมโดยไม่เสียเธรดและประวัติ · ช่องที่ไม่ระบุคงค่าเดิมไว้ · มีผลตั้งแต่รอบถัดไป",
+        "🛑 `/stop` — หยุดงานในเธรดนั้น · 📊 `/status` — ดูงานที่รันอยู่ รอบ schedule ที่กำลังทำ และคิว browser",
         "",
         "ตัวเลือกเสริมของ `/task` และ `/schedule create`:",
         "🧩 `skill:` เลือกสูตรงานสำเร็จรูป (พิมพ์เพื่อค้นหา · ไม่ระบุ = agent เลือกเอง) · 📂 `path:` โฟลเดอร์ทำงาน (ไม่ระบุ = workspace กลาง) · 🧠 `model:` โมเดล",
@@ -560,6 +632,9 @@ export class Bot {
     switch (interaction.options.getSubcommand()) {
       case "create":
         await this.onScheduleCreate(interaction);
+        return;
+      case "edit":
+        await this.onScheduleEdit(interaction);
         return;
       case "list":
         await this.onScheduleList(interaction);
@@ -616,9 +691,10 @@ export class Bot {
       ownerId: interaction.user.id,
       channelId: channel.id,
       threadId: "",
-      // The skill instruction is baked into the stored prompt, so every later
-      // Run carries it with no schema change and no extra lookup.
-      prompt: withSkill(prompt, picked.skill),
+      // Stored apart from the skill, which is applied when a Run sends it, so
+      // `/schedule edit` can change either one without touching the other.
+      prompt,
+      ...(picked.skill ? { skill: picked.skill } : {}),
       workspace: workspace.path,
       model,
       recurrence: parsed.recurrence,
@@ -652,6 +728,109 @@ export class Bot {
         `ทุกรอบรันในเธรดนี้ · หยุดฉุกเฉินได้ทุกคนด้วย \`/schedule pause id:${record.id}\``,
       ].join("\n"),
     );
+  }
+
+  /**
+   * Changes a schedule in place, keeping its id and its thread — so the
+   * history of what it has been doing stays in one place, which delete +
+   * create cannot offer. Same authority as the rest of `manage`: the two
+   * people who could already have done it the long way (ADR 0004).
+   */
+  private async onScheduleEdit(interaction: ChatInputCommandInteraction): Promise<void> {
+    const record = await this.requireSchedule(
+      interaction,
+      interaction.options.getString("id", true),
+      "manage",
+    );
+    if (!record) return;
+
+    // Every option is read as present-or-absent, never through the `?? default`
+    // that creation uses: there absence means "use the default", here it means
+    // "leave this alone". Sharing that shape would let `/schedule edit
+    // prompt:…` quietly revoke a browser grant and reset model and workspace.
+    const edit: ScheduleEdit = {};
+
+    const prompt = interaction.options.getString("prompt");
+    if (prompt !== null) edit.prompt = prompt;
+
+    const every = interaction.options.getString("every");
+    const at = interaction.options.getString("at");
+    const days = interaction.options.getString("days");
+    if (every !== null || at !== null || days !== null) {
+      // A new recurrence replaces the old one whole rather than merging into
+      // it — half of an interval and half of a clock is not a shape ADR 0004
+      // has a meaning for.
+      const parsed = parseRecurrence({
+        every: every ?? undefined,
+        at: at ?? undefined,
+        days: days ?? undefined,
+      });
+      if (!parsed.ok) {
+        await interaction.reply({ content: parsed.error, flags: MessageFlags.Ephemeral });
+        return;
+      }
+      edit.recurrence = parsed.recurrence;
+    }
+
+    const path = interaction.options.getString("path");
+    if (path !== null) {
+      const workspace = this.resolveWorkspace(path);
+      if ("error" in workspace) {
+        await interaction.reply({ content: workspace.error, flags: MessageFlags.Ephemeral });
+        return;
+      }
+      edit.workspace = workspace.path;
+    }
+
+    const model = interaction.options.getString("model");
+    if (model !== null) edit.model = model;
+
+    const browser = interaction.options.getBoolean("browser");
+    if (browser !== null) edit.browserGrant = browser;
+
+    const picked = await this.resolveSkillEdit(interaction);
+    if (!picked.ok) return;
+    if (picked.skill !== undefined) edit.skill = picked.skill;
+
+    if (Object.keys(edit).length === 0) {
+      await interaction.reply({
+        content:
+          "ไม่ได้ระบุอะไรให้แก้ — ใส่อย่างน้อยหนึ่งช่อง เช่น `prompt:`, `every:` หรือ `browser:`",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const changes = applyScheduleEdit(record, edit, new Date());
+    if (changes.length === 0) {
+      await interaction.reply({
+        content: "ค่าที่ส่งมาเหมือนของเดิมทั้งหมด — ไม่มีอะไรเปลี่ยน",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+    await this.scheduleStore.put(record);
+
+    const summary = [
+      `✏️ <@${interaction.user.id}> แก้ schedule \`${record.id}\``,
+      ...changes,
+      record.paused
+        ? `⏸️ ยังหยุดอยู่ — ปลุกด้วย \`/schedule resume id:${record.id}\``
+        : `🔁 ${describeRecurrence(record.recurrence)} · รอบถัดไป ${formatLocal(record.nextRunAt)}`,
+      ...(this.scheduler.isRunning(record.id)
+        ? ["ℹ️ รอบที่กำลังรันอยู่ยังใช้ของเดิม — มีผลตั้งแต่รอบถัดไป"]
+        : []),
+    ].join("\n");
+
+    await interaction.reply(summary);
+    // The schedule's thread is where its history lives, so a change to what it
+    // will do next — a browser grant above all — is recorded there as well.
+    try {
+      const thread = await this.fetchScheduleThread(record);
+      if (thread.id !== interaction.channelId) await thread.send(summary);
+    } catch (error) {
+      console.error(`[bot] could not post edit notice for schedule ${record.id}:`, error);
+    }
   }
 
   private async onScheduleList(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -948,7 +1127,7 @@ export class Bot {
     this.scheduleRuns.set(record.id, session);
 
     try {
-      await session.send(record.prompt);
+      await session.send(withSkill(record.prompt, record.skill ?? null));
     } catch (error) {
       ok = false;
       console.error(`[bot] scheduled run ${record.id} failed:`, error);

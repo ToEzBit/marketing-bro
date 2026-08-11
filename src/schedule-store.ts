@@ -1,7 +1,8 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
-import type { Recurrence } from "./recurrence.js";
+import { describeRecurrence, nextFireAt, type Recurrence } from "./recurrence.js";
+import { unbakeSkill } from "./skills.js";
 
 export type ScheduleRecord = {
   id: string;
@@ -11,7 +12,15 @@ export type ScheduleRecord = {
   channelId: string;
   /** Permanent thread every Run posts into. */
   threadId: string;
+  /** What the Member typed, with no skill instruction baked in — see `skill`. */
   prompt: string;
+  /**
+   * Skill this schedule runs under (ADR 0005), applied to `prompt` at run time
+   * rather than stored folded into it, so `/schedule edit` can change one
+   * without disturbing the other. Records written before this field existed
+   * are normalised on load.
+   */
+  skill?: string;
   workspace: string;
   model: string;
   recurrence: Recurrence;
@@ -47,7 +56,7 @@ export class ScheduleStore {
       const parsed = JSON.parse(raw) as unknown;
       if (!Array.isArray(parsed)) throw new Error("state file does not contain a JSON array");
       for (const record of parsed as ScheduleRecord[]) {
-        this.records.set(record.id, record);
+        this.records.set(record.id, normalizeSkill(record));
       }
     } catch (error) {
       await this.quarantine(raw, error);
@@ -130,6 +139,110 @@ export class ScheduleStore {
     await writeFile(tmpPath, data, "utf8");
     await rename(tmpPath, this.path);
   }
+}
+
+/**
+ * Splits a legacy record's baked-in skill instruction back out into `skill`.
+ * Only records that predate the field are touched: once `skill` is set, the
+ * prompt is already raw and unbaking it again would eat real prompt text.
+ */
+function normalizeSkill(record: ScheduleRecord): ScheduleRecord {
+  if (record.skill !== undefined) return record;
+  const { prompt, skill } = unbakeSkill(record.prompt);
+  if (skill === undefined) return record;
+  return { ...record, prompt, skill };
+}
+
+/**
+ * The fields `/schedule edit` can change. Every one is optional and absence
+ * means "leave it alone" — never "reset to the default", which is what
+ * creation means by the same absence. `skill: null` is the one way to say
+ * "remove it", since absence is already taken.
+ */
+export type ScheduleEdit = {
+  prompt?: string;
+  recurrence?: Recurrence;
+  workspace?: string;
+  model?: string;
+  browserGrant?: boolean;
+  skill?: string | null;
+};
+
+/**
+ * Applies an edit onto a record in place and returns a Thai line per field
+ * that actually changed — an empty array means every value handed in matched
+ * what was already there. A new recurrence recomputes `nextRunAt` off the
+ * original `createdAt` anchor (ADR 0004: the grid is anchored at creation, and
+ * an edit redraws the grid rather than moving its origin). `paused` and
+ * `consecutiveFailures` are deliberately untouched: waking a schedule up and
+ * forgiving its failures belong to `/schedule resume`, so editing a paused
+ * schedule leaves it paused.
+ */
+export function applyScheduleEdit(
+  record: ScheduleRecord,
+  edit: ScheduleEdit,
+  now: Date,
+): string[] {
+  const changes: string[] = [];
+
+  if (edit.prompt !== undefined && edit.prompt !== record.prompt) {
+    record.prompt = edit.prompt;
+    // The new text, not just "the prompt changed": every other line below
+    // reports its new value, and a thread that cannot show what the schedule
+    // now does is not the audit trail ADR 0004 leans on.
+    changes.push(`📝 prompt ใหม่: ${preview(edit.prompt)}`);
+  }
+
+  if (edit.skill !== undefined) {
+    const skill = edit.skill ?? undefined;
+    if (skill !== record.skill) {
+      record.skill = skill;
+      changes.push(skill ? `🧩 ใช้สกิล \`${skill}\`` : "🧩 เอาสกิลออก");
+    }
+  }
+
+  if (
+    edit.recurrence !== undefined &&
+    describeRecurrence(edit.recurrence) !== describeRecurrence(record.recurrence)
+  ) {
+    record.recurrence = edit.recurrence;
+    record.nextRunAt = nextFireAt(
+      edit.recurrence,
+      now,
+      new Date(record.createdAt),
+    ).toISOString();
+    changes.push(`🔁 ${describeRecurrence(edit.recurrence)}`);
+  }
+
+  if (edit.workspace !== undefined && edit.workspace !== record.workspace) {
+    record.workspace = edit.workspace;
+    changes.push(`📂 \`${edit.workspace}\``);
+  }
+
+  if (edit.model !== undefined && edit.model !== record.model) {
+    record.model = edit.model;
+    changes.push(`🧠 \`${edit.model}\``);
+  }
+
+  if (edit.browserGrant !== undefined && edit.browserGrant !== record.browserGrant) {
+    record.browserGrant = edit.browserGrant;
+    changes.push(
+      edit.browserGrant
+        ? "🌐 ให้สิทธิ์ browser (ADR 0004)"
+        : "🚫 ถอนสิทธิ์ browser",
+    );
+  }
+
+  return changes;
+}
+
+/**
+ * A prompt flattened to one line for the change summary. Kept here rather than
+ * reusing the renderer's truncate, so the store stays free of Discord imports.
+ */
+function preview(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > 300 ? `${flat.slice(0, 299)}…` : flat;
 }
 
 /** Filesystem-safe timestamp for a quarantined file's suffix, e.g. 2026-08-05T12-00-00-000Z. */

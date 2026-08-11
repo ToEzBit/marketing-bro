@@ -36,6 +36,11 @@ export class BrowserQueue {
     return this.current;
   }
 
+  /** Requesters still in line, in the order they will be served. For `/status`. */
+  get waiting(): string[] {
+    return this.waiters.map((waiter) => waiter.requester);
+  }
+
   /**
    * Resolves "acquired" once the requester holds the browser — immediately if
    * it is free (or already held by this requester), otherwise after everyone
