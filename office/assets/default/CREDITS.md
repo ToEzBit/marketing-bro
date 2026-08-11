@@ -7,7 +7,8 @@
 สรุปวิธีทำ: ตัวละครประกอบจาก "เลเยอร์" หลายไฟล์ (body/head/legs/torso/hair) ที่ดาวน์โหลดตรงจาก repo
 ทางการของ Universal LPC Spritesheet Character Generator แล้ว**ซ้อนทับด้วย ImageMagick** (ไม่มีการวาด/ตัดต่อ
 ด้วยมือ ไม่มี AI-generated art) — ทุกเลเยอร์เป็นไฟล์ 64×64/เฟรม แนวเดียวกัน จึงซ้อนกันได้พอดีโดยไม่ต้องปรับตำแหน่ง
-ส่วน tileset ห้องประกอบจากการ **crop** ไฟล์จริงของสามแพ็ก (The Office / Walls / Floors) มาวางในตารางเดียว
+ส่วน tileset ห้องประกอบจากการ **crop** ไฟล์จริงของห้าแพ็ก (The Office / Walls / Floors / House Insides /
+Upholstery) มาวางในตารางเดียว
 
 **Share-alike**: เลเยอร์ตัวละครและ tileset ห้องผสมไฟล์ที่มี **CC-BY-SA** อยู่ด้วย ผลลัพธ์ที่ประกอบ/crop แล้ว
 (`characters/**/*.png`, `room/tileset.png`) จึงต้องแจกจ่ายภายใต้ **CC-BY-SA** ต่อ (share-alike propagation)
@@ -69,16 +70,32 @@ walk/idle/sit ทั้งสามไฟล์เป็นสีกากีเ
 
 ## 2. ห้อง (`room/tileset.png`, `room/map.json`)
 
-`tileset.png` เป็นภาพ **crop มาประกอบใหม่** จากไฟล์จริงของ 3 แพ็ก (ไม่ใช่งานวาดใหม่) วางเรียงเป็นตาราง 4×3 ช่อง 32×32:
+`tileset.png` เป็นภาพ **crop มาประกอบใหม่** จากไฟล์จริงของ 5 แพ็ก (ไม่ใช่งานวาดใหม่ ไม่มี AI-generated art)
+วางเรียงเป็นตาราง **16×7 = 112 ช่อง ขนาดช่องละ 32×32** (ใช้จริง 104 ช่อง ที่เหลือเว้นว่างเพื่อให้ชีตเป็น
+สี่เหลี่ยมเต็มใบ ตามที่ `render.js` คิดจำนวนคอลัมน์จากความกว้างจริงของรูป)
 
-| ชิ้น | แหล่ง | ผู้สร้าง | License |
+พิกัดที่ crop เลือกจาก **bounding box จริงของวัตถุ** ไม่ใช่กริดของชีตต้นทาง (ของหลายชิ้นในแพ็ก LPC
+ไม่ได้วางชิดกริด 32px) — จึงมีบางชิ้นที่กินสองช่องในแนวตั้ง เช่น ต้นไม้/ตู้/โต๊ะ
+
+| ชิ้นที่ใช้ | แหล่ง | ผู้สร้าง | License |
 |---|---|---|---|
-| พื้นไม้ (floor) | crop จาก `floors.png` — **[\[LPC\] Floors](https://opengameart.org/content/lpc-floors)** | "bluecarrot16, Lanea Zimmerman (Sharm), William Thompson (William.Thompsonj), Hyptosis, SpiderDave, Cougarmint, Stephen Challener (Redshrike), Bonsaiheldin, Tyler Olsen (Roots), Jetrel, jestan, The Open Surge team, Gaurav Munjal, Reemax, Silveira Neto, bleutailfly, Casper Nilsson, NaRNeRZz, Buch, keith karnage, Arthur Carvalho, Guilherme Vieira (n2liquid), Chris Hamons (maintainer)" — ข้อความเครดิตทั้งก้อนตามที่ `CREDITS-floors.txt` ของแพ็กกำหนด (แพ็กรวมผลงานหลายคน ไม่ระบุราย tile ว่าใครวาดจุดไหน) | CC-BY-SA 4.0 |
-| ผนัง (wall) | crop จาก `walls.png` — **[\[LPC\] Walls](https://opengameart.org/content/lpc-walls)** | "bluecarrot16, Lanea Zimmerman (Sharm), Daniel Armstrong (HughSpectrum), William Thompson (William.Thompsonj), Hyptosis, Zabin, Daniel Cook, Guido Bos, SpiderDave, Cougarmint, Stephen Challener (Redshrike), Matthew Nash, Wolthera van Hövell tot Westerflier (TheraHedwig), Reemax, bleutailfly, NaRNeRZz, Sir Spummington, Casper Nilsson, KnoblePersona" — ข้อความเครดิตทั้งก้อนตามที่ `CREDITS-walls.txt` ของแพ็กกำหนด | CC-BY-SA 3.0 |
-| แก้วกาแฟ, แล็ปท็อป (เปิด/ปิด), เครื่องทำน้ำเย็น, เครื่องถ่ายเอกสาร | ไฟล์เต็มจาก **[\[LPC Revised\] The Office](https://opengameart.org/content/lpc-revised-the-office)** (`Coffee Cup.png`, `Laptop.png`, `Water Cooler.png`, `Copy Machine.png`) | Eliza Wyatt | OGA-BY 3.0 |
+| พื้น 8 แบบ (กระเบื้องเทา, ปาร์เกต์ไม้, พรมน้ำเงิน, พรมแดง, หินอ่อน, กระเบื้องแปดเหลี่ยม, กระเบื้องข้าวหลามตัด, กระเบื้องหยาบ) | crop จาก `floors.png` — **[\[LPC\] Floors](https://opengameart.org/content/lpc-floors)** | "bluecarrot16, Lanea Zimmerman (Sharm), William Thompson (William.Thompsonj), Hyptosis, SpiderDave, Cougarmint, Stephen Challener (Redshrike), Bonsaiheldin, Tyler Olsen (Roots), Jetrel, jestan, The Open Surge team, Gaurav Munjal, Reemax, Silveira Neto, bleutailfly, Casper Nilsson, NaRNeRZz, Buch, keith karnage, Arthur Carvalho, Guilherme Vieira (n2liquid), Chris Hamons (maintainer)" — ข้อความเครดิตทั้งก้อนตามที่ `CREDITS-floors.txt` ของแพ็กกำหนด (แพ็กรวมผลงานหลายคน ไม่ระบุราย tile ว่าใครวาดจุดไหน) | CC-BY-SA 4.0 |
+| ผนัง 5 แบบ (ผนังเรียบท่อนบน/กลาง/ล่างพร้อมบัวพื้น + ผนังบุไม้สีทองท่อนบน/ล่าง ของห้อง Approval) | crop จาก `walls.png` — **[\[LPC\] Walls](https://opengameart.org/content/lpc-walls)** | "bluecarrot16, Lanea Zimmerman (Sharm), Daniel Armstrong (HughSpectrum), William Thompson (William.Thompsonj), Hyptosis, Zabin, Daniel Cook, Guido Bos, SpiderDave, Cougarmint, Stephen Challener (Redshrike), Matthew Nash, Wolthera van Hövell tot Westerflier (TheraHedwig), Reemax, bleutailfly, NaRNeRZz, Sir Spummington, Casper Nilsson, KnoblePersona" — ข้อความเครดิตทั้งก้อนตามที่ `CREDITS-walls.txt` ของแพ็กกำหนด | CC-BY-SA 3.0 |
+| แก้วกาแฟ, แล็ปท็อป (เปิด/ปิด), เครื่องทำน้ำเย็น, เครื่องถ่ายเอกสาร, เครื่องชงกาแฟ, ถังขยะ, ตู้จดหมาย, โทรศัพท์, โต๊ะพับ (card table) | **[\[LPC Revised\] The Office](https://opengameart.org/content/lpc-revised-the-office)** (`Coffee Cup.png`, `Laptop.png`, `Water Cooler.png`, `Copy Machine.png`, `Coffee Maker.png`, `Bins.png`, `Mailboxes.png`, `Rotary Phones.png`, `Card Table.png`) | Eliza Wyatt | OGA-BY 3.0 |
+| โต๊ะทำงานมีลิ้นชัก, เคาน์เตอร์ยาว, ตู้เอกสารสูง (จาก `Desk, Ornate.png`) · ภาพติดผนัง (จาก `Office Portraits.png`) | **[\[LPC Revised\] The Office](https://opengameart.org/content/lpc-revised-the-office)** | Eliza Wyatt, Lanea Zimmerman — ตาม `Credits.txt` ของแพ็ก: "Made by Eliza, with pieces of Lanea Zimmerman's cupboards and countertops" / กรอบรูปโดย Eliza Wyatt ภาพผู้หญิงโดย Lanea Zimmerman | OGA-BY 3.0 (DRM waived by Lanea Zimmerman) |
+| จอพรีเซนต์ / จอสถานะบนผนัง (จาก `TV, Widescreen.png`) | **[\[LPC Revised\] The Office](https://opengameart.org/content/lpc-revised-the-office)** | Eliza Wyatt | OGA-BY 3.0 |
+| เก้าอี้ 4 ทิศ, เก้าอี้นวม, ต้นไม้ในกระถาง, ตู้ลิ้นชักเอกสาร, ชั้นหนังสือ, ประตูห้อง | crop จาก `house_inside.png` — **[\[LPC\] House Insides](https://opengameart.org/content/lpc-house-insides)** | Lanea Zimmerman (Sharm) — ตาม Attribution Instructions ของแพ็ก: "Sharm did everything except the castle light sources, those were done by HughSpectrum" (ชิ้นของ HughSpectrum คือ castle light sources ซึ่ง**ไม่ได้ถูกใช้**ในไฟล์นี้) | CC-BY-SA 3.0 / GPL 3.0 |
+| โซฟาในมุมพักผ่อน | crop จาก `upholstery.png` — **[\[LPC\] Upholstery](https://opengameart.org/content/lpc-upholstery)** | bluecarrot16, Lanea Zimmerman (Sharm) | CC-BY 4.0 / CC-BY 3.0 / CC-BY-SA 4.0 / CC-BY-SA 3.0 / GPL 3.0 / OGA-BY 3.0 |
+
+**ข้อความเครดิตที่ [\[LPC\] Upholstery](https://opengameart.org/content/lpc-upholstery) บังคับให้แนบไปด้วย**
+(ช่อง Copyright/Attribution Notice ของหน้าต้นทาง — ยกมาตรงตัว):
+
+> "[LPC] Upholstery" by bluecarrot16, Lanea Zimmerman (Sharm). Please link back to
+> <https://opengameart.org/content/lpc-upholstery> and <https://opengameart.org/content/lpc-interior-castle-tiles> .
 
 `map.json` เป็นไฟล์ Tiled JSON ที่เขียนขึ้นเอง (geometry/พิกัดล้วน ไม่ใช่งานศิลป์) อ้าง gid เข้า `tileset.png` ข้างต้น
-— ดูความหมายฟิลด์ที่โค้ดอ่านใน [`README.md`](./README.md)
+— ดูความหมายฟิลด์ที่โค้ดอ่านใน [`README.md`](./README.md) โดยเลเยอร์ `walls` ใช้วางทั้งผนังและ**เฟอร์นิเจอร์ชิ้นใหญ่**
+ส่วน `props` ใช้วางของชิ้นเล็กที่ต้องซ้อนทับ (หนึ่งเซลล์ของหนึ่ง layer วางได้ tile เดียว จึงต้องแบ่งสองชั้น)
 
 **Liberated Palette** (`_ Liberated Palette Ramps.png` ที่แนบมากับ The Office แต่ไม่ได้ใช้ตัดต่อในไฟล์นี้)
 เป็นของ Liberated Pixel Cup เช่นกัน ไม่ได้ commit ไฟล์นี้ลง repo (ไม่จำเป็นต่อการ render)
