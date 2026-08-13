@@ -22,6 +22,7 @@ import {
   pickCharacterFolder,
   tileLayersOf,
   animationFrameIndex,
+  restFrameIndex,
   characterLabelBox,
   clampBoxInto,
   fixedLabels,
@@ -504,13 +505,15 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
    * ท่า (spec §7.4): กำลังย้ายโซน → `walk` เล่นวนตาม `frames`/`fps` ของ manifest และเลือกแถวจาก
    * ทิศการเคลื่อนที่ · อยู่นิ่ง → ท่าตาม `manifest.states[state].anim` **ตรึงเฟรมเดียว** โดยตั้งใจ
    * เพราะท่าอยู่นิ่งของ LPC ไม่ใช่ลูปเดิน (`sit.png` 3 "เฟรม" คือ 3 ท่านั่งคนละท่า เล่นวนแล้วจะกระตุก)
+   * **เฟรมไหน** เป็นเรื่องของชุด asset (`states.<state>.frame`) ไม่ใช่ 0 เสมอ — ดู restFrameIndex()
    */
   function drawSpriteFrame(item, dir) {
     const { manifest, folders } = assets; // ตัวชีตเองหยิบผ่าน resolveAnim()
     const meta = item.meta;
     const folder = folders[pickCharacterFolder(meta.id, folders.length)];
+    const stateDef = manifest.states?.[meta.state];
     const walking = item.moving ? resolveAnim(folder, WALK_ANIM) : null;
-    const anim = walking || resolveAnim(folder, manifest.states?.[meta.state]?.anim || "idle");
+    const anim = walking || resolveAnim(folder, stateDef?.anim || "idle");
     if (!anim) return; // ป้องกัน crash ถ้า manifest อ้างถึงไฟล์ที่โหลดไม่สำเร็จ
 
     const chr = manifest.character;
@@ -520,7 +523,9 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
     const anchor = chr.anchor || [];
     const anchorX = Number.isFinite(anchor[0]) ? anchor[0] : fw / 2;
     const anchorY = Number.isFinite(anchor[1]) ? anchor[1] : fh - 2;
-    const frameIndex = walking ? animationFrameIndex(item.animMs, anim.def.frames, anim.def.fps) : 0;
+    const frameIndex = walking
+      ? animationFrameIndex(item.animMs, anim.def.frames, anim.def.fps)
+      : restFrameIndex(stateDef, anim.def.frames);
     ctx.drawImage(
       anim.img,
       offX + frameIndex * fw,

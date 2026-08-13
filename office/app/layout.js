@@ -130,7 +130,14 @@ export function buildZones(rectOverrides = {}) {
   // ทำให้ระยะห่างเหลือ 1.7 tile ซึ่งแคบกว่าความกว้างป้าย ป้ายจึงชนกันแน่นอนไม่ว่าจะบีบข้อความแค่ไหน
   zones.stopped.slots = gridSlots(zones.stopped.rect, 2, 2, { ...GRID, padTop: 2.4, count: 3 });
   zones.bug.slots = gridSlots(zones.bug.rect, 2, 2, { ...GRID, padTop: 2.4, count: 3 });
-  // desks: แถวอยู่ใต้แถวโต๊ะจริงของ map.json (โต๊ะ row 2/7/12, เก้าอี้ row 3/8/13) — 3.2 / 8.0 / 12.8
+  // ---- desks: ที่นั่งต้องลงบน "เก้าอี้จริง" ของ map.json ไม่ใช่บนโต๊ะ (บั๊กภาพ #20) ----
+  // ผังจริงที่วัดจาก map.json (ไม่ใช่ที่คอมเมนต์เก่าเขียนไว้ผิดว่า "โต๊ะ row 2/7/12 เก้าอี้ row 3/8/13"):
+  //   โต๊ะเป็นบล็อกสูง **2 tile** ที่ layer walls — row 2-3, 7-8, 12-13 (แถวบน = หน้าโต๊ะ+โน้ตบุ๊ก,
+  //   แถวล่าง = ลิ้นชัก โดยมีช่องเว้าใส่ขาตรงกลางบล็อกละหนึ่งช่อง)
+  //   **เก้าอี้มีจริง** เป็น prop วางในช่องเว้านั้น — tile (18,3) (21,3) (18,8) (21,8) (18,13) (21,13)
+  // ⇒ คอลัมน์ที่นั่งตรงกับกลาง tile เก้าอี้พอดี (18.5 / 21.5) และ **แถว** ต้องเป็นแถวเก้าอี้ + CHAIR_SEAT_Y
+  // เดิม padTop 2.2 ทำให้จุดเท้าอยู่ที่ 3.2/8.0/12.8 = ขอบบนของแถวเก้าอี้ ⇒ ลำตัวแผ่ขึ้นไปคลุมโต๊ะทั้งตัว
+  // (อ่านเป็น "นั่งขัดสมาธิบนโต๊ะ" เพราะ sit เฟรม 0 เป็นท่านั่งกับพื้น — ดู restFrameIndex)
   zones.desks.slots = gridSlots(zones.desks.rect, 2, 3, { ...GRID, padTop: 2.2 });
 
   {
@@ -525,6 +532,24 @@ export function directionFromVector(dx, dy, directions = DEFAULT_DIRECTIONS) {
   const list = Array.isArray(directions) && directions.length ? directions : DEFAULT_DIRECTIONS;
   const wanted = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : dy > 0 ? "down" : "up";
   return list.includes(wanted) ? wanted : list[0];
+}
+
+/**
+ * เฟรม "ท่าอยู่นิ่ง" ที่ต้องวาดให้สถานะหนึ่ง — ชีตท่าอยู่นิ่งของ LPC **ไม่ใช่ลูปอนิเมชัน** แต่เป็น
+ * ท่าคนละท่ารวมไว้ไฟล์เดียว: `sit.png` เฟรม 0/1 = นั่งขัดสมาธิกับพื้น, เฟรม **2 = นั่งเก้าอี้**
+ * (วัดจากชีตจริง: เฟรม 2 ทิศ down มีขาห้อยลงและปลายเท้าอยู่ที่ระดับ anchor พอดี)
+ *
+ * ชุด asset เป็นคนบอกว่าสถานะไหนใช้ท่าไหนผ่าน `manifest.states.<state>.frame` — ไม่ระบุ = 0
+ * (พฤติกรรมเดิม) และค่าที่เกินจำนวนเฟรมจริงของชีตถูกหนีบลง ⇒ ชุดที่ sit มีเฟรมเดียวก็ไม่อ่านเลยชีต
+ * @param {{frame?:number}|undefined} stateDef ก้อน `manifest.states[state]`
+ * @param {number} frameCount จำนวนเฟรมของชีตที่คลี่ fallback แล้ว (`animations.<anim>.frames`)
+ */
+export function restFrameIndex(stateDef, frameCount) {
+  const wanted = Math.floor(Number(stateDef?.frame));
+  if (!Number.isFinite(wanted) || wanted <= 0) return 0;
+  const count = Math.floor(Number(frameCount));
+  if (!(count > 1)) return 0;
+  return Math.min(wanted, count - 1);
 }
 
 /**

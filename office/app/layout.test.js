@@ -17,6 +17,7 @@ import {
   doorSlotFor,
   directionFromVector,
   animationFrameIndex,
+  restFrameIndex,
   boxesOverlap,
   boxInside,
   slotLabelBox,
@@ -321,6 +322,33 @@ check("animationFrameIndex วนลูปตาม frames/fps ของ manifes
   assert.equal(animationFrameIndex(340, 2, 3), 1); // idle 2 เฟรมที่ 3fps
   assert.equal(animationFrameIndex(667, 2, 3), 0); // ครบ 2 เฟรม → วนกลับ 0
   assert.equal(animationFrameIndex(1000, 2, 3), 1); // 3 เฟรมผ่านไป → 3 % 2
+});
+
+check("restFrameIndex: ไม่ระบุ frame ใน manifest = เฟรม 0 (พฤติกรรมเดิมของทุกชุด asset)", () => {
+  assert.equal(restFrameIndex(undefined, 3), 0);
+  assert.equal(restFrameIndex({}, 3), 0);
+  assert.equal(restFrameIndex({ anim: "sit" }, 3), 0);
+});
+
+check("restFrameIndex: ชุด default บอกให้ working ใช้เฟรมนั่งเก้าอี้ (ไม่ใช่นั่งกับพื้น) — บั๊กภาพ #20", () => {
+  const manifest = JSON.parse(readFileSync(new URL("../assets/default/manifest.json", import.meta.url), "utf8"));
+  const sit = manifest.character.animations.sit;
+  assert.equal(manifest.states.working.anim, "sit");
+  assert.equal(restFrameIndex(manifest.states.working, sit.frames), 2, "ท่านั่งเก้าอี้คือเฟรม 2 ของ sit.png");
+  // สถานะที่เหลือยังเป็นเฟรม 0 — failed ใช้ sleep→sit เฟรม 0 (ท่าทรุดกับพื้น) โดยตั้งใจ
+  for (const id of ["idle", "approval", "failed", "stopped"]) {
+    assert.equal(restFrameIndex(manifest.states[id], sit.frames), 0, `states.${id} ต้องยังเป็นเฟรม 0`);
+  }
+});
+
+check("restFrameIndex หนีบค่าไม่ให้อ่านเลยชีต (ชุด asset ที่ sit มีเฟรมเดียวต้องไม่วาดพัง — §8.2)", () => {
+  assert.equal(restFrameIndex({ frame: 2 }, 1), 0);
+  assert.equal(restFrameIndex({ frame: 9 }, 3), 2);
+  for (const bad of [undefined, 0, -1, NaN, "x", null]) {
+    assert.equal(restFrameIndex({ frame: 2 }, bad), 0, `frameCount=${bad}`);
+    assert.equal(restFrameIndex({ frame: bad }, 3), 0, `frame=${bad}`);
+  }
+  assert.equal(restFrameIndex({ frame: 1.9 }, 3), 1); // ปัดลงเป็นจำนวนเต็ม
 });
 
 check("animationFrameIndex คืน 0 อย่างปลอดภัยเมื่อ manifest ไม่ได้บอก frames/fps มา", () => {
