@@ -27,6 +27,8 @@ import {
   fixedLabels,
   labelFitReport,
   gridSlots,
+  chooseTilePx,
+  MIN_TILE_PX,
   CHAR_LABEL_W_TILES,
   CHAR_LABEL_H,
   CHAR_LABEL_TOP_OFFSET,
@@ -185,6 +187,102 @@ check("tilePxOf ปัดเป็นจำนวนเต็ม (กันร�
     assert.equal(tilePxOf(bad, 1), PLACEHOLDER_TILE_SIZE, `tileSize=${bad} ต้องตกกลับไปค่าปลอดภัย`);
   }
   assert.equal(tilePxOf(32, 0), 32); // scale 0/หายไป = 1 ไม่ใช่ห้องกว้าง 0
+});
+
+console.log("\nเลือก tilePx จากพื้นที่ที่มีจริง — ห้องกินพื้นที่จอให้เต็ม (#20)");
+
+/**
+ * กล่องพื้นที่ว่างจริงของแต่ละขนาดหน้าต่าง — **วัดจากเบราว์เซอร์จริง** ไม่ใช่เดาจากสูตร
+ * (Playwright + harness ของ office/index.html: อ่าน .stage.getBoundingClientRect() หัก padding/border
+ *  ด้วยโค้ดชุดเดียวกับ availableRoomBox() ใน main.js) — ถ้าใครแก้ chrome ของหน้า (ความสูง header /
+ *  ความกว้างแผงข้าง / padding) ตัวเลขชุดนี้ต้องวัดใหม่ ไม่ใช่แก้ให้เทสต์ผ่าน
+ */
+const SCREENS = [
+  { name: "1280×800", availW: 906, availH: 673, expect: 32 },
+  { name: "1440×900", availW: 1066, availH: 773, expect: 32 },
+  { name: "1920×1080", availW: 1546, availH: 953, expect: 48 },
+  { name: "2560×1440", availW: 2186, availH: 1313, expect: 64 },
+  { name: "1024×768 (จอเล็ก)", availW: 650, availH: 641, expect: 32 },
+  { name: "1920×1080 เต็มจอ", availW: 1920, availH: 1080, expect: 60 },
+  { name: "2560×1440 เต็มจอ", availW: 2560, availH: 1440, expect: 80 },
+];
+
+check("ทุกขนาดจอในตารางได้ tilePx ตามที่คำนวณด้วยมือไว้ (ห้องกว้าง 32×16 tile)", () => {
+  for (const s of SCREENS) {
+    assert.equal(chooseTilePx({ availW: s.availW, availH: s.availH }), s.expect, `จอ ${s.name}`);
+  }
+});
+
+check("จอเล็กเกินกว่าห้องจะลง → คาที่ MIN_TILE_PX ไม่ย่อลงอีก (ให้เลื่อนดูแทนการย่อจนป้ายพัง)", () => {
+  assert.equal(MIN_TILE_PX, 32);
+  // 1024×768: fit = min(650/32, 641/16) = 20.3 → ถ้าไม่มีพื้นล่าง ห้องจะเหลือ tile 20px ป้ายจะล้นโซนทันที
+  assert.equal(chooseTilePx({ availW: 650, availH: 641 }), 32);
+  assert.equal(chooseTilePx({ availW: 320, availH: 200 }), 32);
+  for (const bad of [0, -100, NaN, undefined]) {
+    assert.equal(chooseTilePx({ availW: bad, availH: 800 }), 32, `availW=${bad}`);
+    assert.equal(chooseTilePx({ availW: 1600, availH: bad }), 32, `availH=${bad}`);
+  }
+});
+
+check("ทวีคูณของ tile ต้นฉบับชนะเมื่อยังกินพื้นที่ได้ ≥88% (พิกเซลอาร์ตคมสนิท)", () => {
+  assert.equal(chooseTilePx({ availW: 32 * 64, availH: 16 * 64 }), 64); // พอดีเป๊ะ = ขยาย 2 เท่า
+  assert.equal(chooseTilePx({ availW: 32 * 70, availH: 16 * 70 }), 64); // 64/70 = 91% ≥ 88% → ยอมเสียที่
+  assert.equal(chooseTilePx({ availW: 32 * 33, availH: 16 * 33 }), 32); // 32/33 = 97%
+});
+
+check("ต่ำกว่า 88% ยอมให้พิกเซลไม่เท่ากัน แล้วใช้ integer ที่ใหญ่สุดที่ยังใส่ได้ (ไม่เหลือขอบดำครึ่งจอ)", () => {
+  assert.equal(chooseTilePx({ availW: 32 * 76, availH: 16 * 76 }), 76); // 64/76 = 84% < 88%
+  assert.equal(chooseTilePx({ availW: 32 * 63, availH: 16 * 63 }), 63); // 32/63 = 51%
+  assert.equal(chooseTilePx({ availW: 32 * 48.9, availH: 16 * 60 }), 48); // เศษถูกปัดลงเป็นจำนวนเต็ม
+});
+
+check("คืนจำนวนเต็มเสมอ และไม่มีวันทำให้ห้องล้นกรอบที่ให้มา (เว้นตอนคาที่ MIN_TILE_PX)", () => {
+  for (let w = 700; w <= 3000; w += 7) {
+    const tilePx = chooseTilePx({ availW: w, availH: 1200 });
+    assert.ok(Number.isInteger(tilePx), `availW=${w} ได้ ${tilePx} ซึ่งไม่ใช่จำนวนเต็ม`);
+    assert.ok(tilePx >= MIN_TILE_PX, `availW=${w} ได้ ${tilePx} ซึ่งต่ำกว่า MIN_TILE_PX`);
+    if (tilePx > MIN_TILE_PX) {
+      assert.ok(tilePx * ROOM.cols <= w, `availW=${w} ได้ห้องกว้าง ${tilePx * ROOM.cols} ซึ่งล้นกรอบ`);
+      assert.ok(tilePx * ROOM.rows <= 1200, `availW=${w}: ห้องสูง ${tilePx * ROOM.rows} ล้นกรอบ`);
+    }
+  }
+});
+
+check("ขนาดห้อง/ขนาด tile ต้นฉบับมาจาก map.json+manifest ห้าม assume 32×16 หรือ 32px (§8.2)", () => {
+  // ห้องสูงกว่า (40×30) ⇒ ความสูงเป็นตัวบีบแทนความกว้าง
+  assert.equal(chooseTilePx({ availW: 4000, availH: 16 * 60, cols: 40, rows: 30 }), 32);
+  assert.equal(chooseTilePx({ availW: 40 * 50, availH: 30 * 50, cols: 40, rows: 30 }), 50);
+  // ชุด asset ที่ tile ต้นฉบับ 16px → "ทวีคูณ" คือทวีคูณของ 16 (แต่ยังห้ามต่ำกว่า MIN_TILE_PX)
+  assert.equal(chooseTilePx({ availW: 32 * 50, availH: 16 * 50, baseTilePx: 16 }), 48);
+  assert.equal(chooseTilePx({ availW: 320, availH: 200, baseTilePx: 16 }), 32);
+  // ชุดที่ tile ต้นฉบับใหญ่กว่า 32 ห้ามถูกย่อลงมา 32 (ย่อภาพพิกเซล = เละกว่าห้องล้นจอ)
+  assert.equal(chooseTilePx({ availW: 320, availH: 200, baseTilePx: 64 }), 64);
+  assert.equal(chooseTilePx({ availW: 32 * 130, availH: 16 * 130, baseTilePx: 64 }), 128);
+});
+
+check("★ containment ยังจริงที่ tilePx *ทุกค่าที่ chooseTilePx เลือกจริง* (ไม่ใช่แค่ค่าที่เลือกมาเทสต์เอง)", () => {
+  const chosen = new Set(SCREENS.map((s) => chooseTilePx({ availW: s.availW, availH: s.availH })));
+  // กวาดทุกความกว้างจอที่เป็นไปได้ด้วย เผื่อมีค่าแปลก ๆ ที่ตารางข้างบนไม่โดน
+  for (let w = 600; w <= 4000; w += 13) chosen.add(chooseTilePx({ availW: w, availH: 2200 }));
+  for (const tilePx of chosen) {
+    for (const autoPaused of [0, 3]) {
+      const problems = labelFitReport(zones, tilePx, autoPaused);
+      assert.deepEqual(problems, [], `tilePx=${tilePx}: ${problems.map((p) => p.detail).join(" | ")}`);
+    }
+  }
+});
+
+check("★ ป้ายของทุกที่นั่งอยู่ในห้องอยู่แล้วที่ tilePx ทุกค่าที่เลือกจริง (clamp ยังเป็น no-op)", () => {
+  for (const s of SCREENS) {
+    const tilePx = chooseTilePx({ availW: s.availW, availH: s.availH });
+    const bounds = { x1: 4, y1: 4, x2: ROOM.cols * tilePx - 4, y2: ROOM.rows * tilePx - 4 };
+    for (const id of ZONE_IDS) {
+      zones[id].slots.forEach((slot, i) => {
+        const raw = slotLabelBox(slot, tilePx);
+        assert.deepEqual(clampBoxInto(raw, bounds), raw, `จอ ${s.name} โซน ${id} ที่นั่ง ${i}`);
+      });
+    }
+  }
 });
 
 console.log("\nเลือกแถวสไปรต์จากเวกเตอร์การเคลื่อนที่ (§7.4)");

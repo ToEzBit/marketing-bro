@@ -167,6 +167,60 @@ export function worldPos(slot, tilePx = TILE) {
 }
 
 // ---------------------------------------------------------------------------
+// เลือก px ต่อ tile จากพื้นที่ที่มีจริงบนจอ — pure ล้วน (main.js เป็นคนวัดกล่องแล้วส่งตัวเลขเข้ามา)
+//
+// หลักการ: ห้องขยายด้วยการ **วาดใหญ่ขึ้น** ไม่ใช่ยืดภาพ — CSS ยืด canvas 1024px ให้เต็มจอเมื่อไร
+// ตัวหนังสือไทยเบลอทันที (สระบน/ล่างเละก่อนใคร) เพิ่ม tilePx แล้ววาดใหม่ที่ความละเอียดจริงเท่านั้น
+// ---------------------------------------------------------------------------
+
+/** px ต่อ tile ต่ำสุดที่ยอมให้ห้องหดลงไป
+ *
+ *  กล่องป้าย (CHAR_LABEL_H / CHAR_LABEL_TOP_OFFSET / ZONE_LABEL_INSET / zoneHeaderHeight) มีหน่วยเป็น
+ *  px ตายตัว **ไม่หดตาม tile** ⇒ ยิ่ง tilePx เล็ก ป้ายยิ่งกินสัดส่วนโซนมากขึ้นจนล้นในที่สุด
+ *  (แถวล่างของคิว Browser คือจุดที่ตึงที่สุด: 5.85t + 4 + 29 ≤ 7t − 2 ⇒ t ≥ 30.4)
+ *  เทสต์ containment จึงการันตีไว้ที่ ≥32 เท่านั้น — จอที่แคบกว่านี้ให้ **เลื่อนดู** แทนการย่อจนป้ายพัง */
+export const MIN_TILE_PX = TILE;
+
+/** สัดส่วนขั้นต่ำที่ tilePx แบบ "ทวีคูณของ tile ต้นฉบับ" ต้องทำได้ ถึงจะยอมเสียพื้นที่เพื่อความคม
+ *  วัดเป็น **ความยาวด้าน** (tilePx ต่อ tilePx) ไม่ใช่พื้นที่ — ดูเหตุผลใน chooseTilePx() */
+export const CRISP_TILE_RATIO = 0.88;
+
+/**
+ * px ต่อ tile ที่ควรใช้กับพื้นที่ว่างขนาด availW × availH (px ของ CSS หลังหักหัวข้อ/แผงข้าง/ขอบแล้ว)
+ *
+ * เกณฑ์ (ตามที่เจ้าของโปรเจกต์ขอ):
+ *  1. ค่าที่ใหญ่ที่สุดที่ห้องยังใส่ได้ทั้งใบคือ `fit = min(availW/cols, availH/rows)`
+ *  2. **ทวีคูณของขนาด tile ต้นฉบับ** (32 สำหรับชุด asset ที่ ship จริง) ทำให้พิกเซลอาร์ตคมสนิท เพราะ
+ *     ทุกพิกเซลต้นฉบับถูกขยายเป็นจำนวนเต็มเท่ากันหมด — ค่าที่ไม่ใช่ทวีคูณ (เช่น 46) พิกเซลจะขนาด
+ *     ไม่เท่ากันเล็กน้อย เห็นได้แต่ยอมรับได้
+ *  3. จึงใช้ทวีคูณนั้น **ถ้ามันยังกินพื้นที่ได้ ≥ 88% ของที่มี** ไม่งั้นยอมพิกเซลไม่เท่ากันแล้วใช้
+ *     integer ที่ใหญ่สุดที่ยังใส่ได้ (การเหลือขอบดำครึ่งจอเพื่อความคมไม่คุ้ม)
+ *  4. ไม่ต่ำกว่า MIN_TILE_PX เด็ดขาด — จอเล็กเกินไปให้ห้องล้นแล้วเลื่อนดูแทน (ดูเหตุผลที่ MIN_TILE_PX)
+ *
+ * 88% วัดเป็น **ความยาวด้าน** ไม่ใช่พื้นที่โดยตั้งใจ: ถ้าวัดเป็นพื้นที่ ทวีคูณต้องได้ ≥93.8% ของด้าน
+ * ซึ่งแทบไม่มีวันเกิดกับจอจริง (สาขานี้จะกลายเป็นโค้ดตาย) และจะพลาดเคสสำคัญที่สุดคือจอ 2560×1440
+ * ที่ได้ 64px = ขยาย 2 เท่าพอดี
+ *
+ * @param {{availW:number, availH:number, cols?:number, rows?:number, baseTilePx?:number}} args
+ *   `baseTilePx` = ขนาด tile ต้นฉบับบนจอจาก manifest (tileSize × scale) — ห้าม assume 32 (spec §8.2)
+ * @returns {number} จำนวนเต็มเสมอ (ครึ่งพิกเซลทำให้รอยต่อ tile เป็นเส้นบาง ๆ)
+ */
+export function chooseTilePx({ availW, availH, cols = ROOM.cols, rows = ROOM.rows, baseTilePx = TILE }) {
+  const base = Math.floor(Number(baseTilePx)) > 0 ? Math.floor(Number(baseTilePx)) : TILE;
+  const c = Number(cols) > 0 ? Number(cols) : ROOM.cols;
+  const r = Number(rows) > 0 ? Number(rows) : ROOM.rows;
+  // ห้องเล็กกว่าขนาดต้นฉบับ = ย่อภาพพิกเซลลง ซึ่งพังยิ่งกว่าห้องล้นจอ ⇒ พื้นล่างคือ max(32, ต้นฉบับ)
+  const floorPx = Math.max(MIN_TILE_PX, base);
+  const fit = Math.min(Number(availW) / c, Number(availH) / r);
+  if (!Number.isFinite(fit) || fit <= 0) return floorPx;
+
+  const largest = Math.floor(fit); // ค่า integer ที่ใหญ่สุดที่ยังใส่ได้ทั้งห้อง
+  const crisp = Math.floor(fit / base) * base; // ทวีคูณของ tile ต้นฉบับที่ใหญ่สุดที่ยังใส่ได้
+  const useCrisp = crisp >= floorPx && crisp >= fit * CRISP_TILE_RATIO;
+  return Math.max(floorPx, useCrisp ? crisp : largest);
+}
+
+// ---------------------------------------------------------------------------
 // อ่าน map.json (Tiled JSON subset ตาม spec §8.2) — pure ล้วน ไม่แตะ network/DOM
 // ฟังก์ชันพวกนี้รับ object ที่ parse แล้วเข้ามา (assets.js เป็นคนไป fetch) จะได้เทสต์ได้ตรง ๆ
 // ---------------------------------------------------------------------------
