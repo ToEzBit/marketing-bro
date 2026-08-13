@@ -228,6 +228,49 @@ section h2 {
   padding: 6px 8px;
   margin-top: 6px;
 }
+/* รายชื่อตัวละครที่ไม่มีที่นั่งในโซน (เปิดจากชิป `+n` ที่หัวโซน) — ปุ่มพวกนี้แค่เปลี่ยนสิ่งที่กำลังดู
+   ในหน้านี้เท่านั้น ไม่ได้สั่งงานอะไร (ADR 0002: Office UI อ่านอย่างเดียว) */
+.infocard .overflow-item {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin-top: 6px;
+  cursor: pointer;
+  font: inherit;
+}
+.infocard .overflow-item:hover {
+  border-color: var(--accent);
+}
+.infocard .overflow-name {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.infocard .overflow-sub {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.infocard .overflow-back {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-bottom: 8px;
+  font: inherit;
+  font-size: 12px;
+  color: #7db4ff;
+  cursor: pointer;
+}
+.infocard .overflow-back:hover {
+  text-decoration: underline;
+}
+
 .infocard .link {
   display: inline-block;
   margin-top: 10px;

@@ -29,6 +29,7 @@ import {
   LABEL_PLATE_H,
   LABEL_PLATE_PAD_X,
 } from "./layout.js";
+import { overflowGroups } from "./state.js";
 
 const STATE_META = {
   idle: { label: "ว่าง", icon: "💤", color: "#5aa9e6" },
@@ -52,6 +53,10 @@ export const VECTOR_FURNITURE_COLORS = {
   sofa: "#3b6a8f",
   table: "#6b5220",
 };
+
+/** แผ่นรองของชิป `+n` ที่หัวโซน — สีทึบเรียบ (ห้าม glow/blur บนตัวหนังสือ และห้ามเป็น effect ตามเวลา
+ *  เพราะของที่ขยับได้สงวนไว้ให้โซน Approval เท่านั้น — spec §7.4) แค่บอกว่า "ตรงนี้กดได้" */
+const OVERFLOW_CHIP_BG = "rgba(255,255,255,.22)";
 
 /** งบ (px) ขั้นต่ำที่ต้องเหลือให้ headline ถึงจะยอมพิมพ์ต่อท้ายนาฬิกา — น้อยกว่านี้พิมพ์ไปก็ได้แค่ "…"
  *  (และห้ามปล่อยให้งบเป็น 0 เพราะ clipTextToWidth มองค่า falsy ว่า "ไม่จำกัด" แล้วข้อความจะล้นกล่อง) */
@@ -569,8 +574,12 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
   /**
    * ป้ายที่ตำแหน่งตายตัว (หัวโซน / FIFO / ผู้ถือ Browser / auto-pause) — วาดจาก spec ของ layout.js
    * `spec.w` คือความกว้างสูงสุด; แผ่นรองย่อตามข้อความจริงแต่ไม่มีวันเกิน ⇒ อยู่ในกรอบโซนเสมอ
+   *
+   * @param {string|null} [chipBg] สีแผ่นรองของส่วน `suffix` — ใส่เมื่อ suffix เป็นของที่ "กดได้" (ชิป +n)
+   * @returns {{plate:object, chip:object|null}} กล่องที่ **วาดจริง** (ไม่ใช่กล่องความกว้างสูงสุดของ spec)
+   *   `chip` = กล่องของ suffix ใช้เป็นพื้นที่คลิก ⇒ กรอบคลิกตรงกับสิ่งที่ตาเห็นเสมอ
    */
-  function drawFixedLabel(spec, lines, bg) {
+  function drawFixedLabel(spec, lines, bg, chipBg = null) {
     const budget = spec.w - LABEL_PLATE_PAD_X * 2;
     let widest = 0;
     const prepared = lines.map((line) => {
@@ -584,13 +593,19 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
       const text = clipTextToWidth(ctx, line.text, head) + suffix;
       const w = Math.min(budget, ctx.measureText(text).width);
       if (w > widest) widest = w;
-      return { ...line, text };
+      return { ...line, text, width: w, suffixWidth: suffix ? ctx.measureText(suffix).width : 0 };
     });
     const plateW = Math.min(spec.w, widest + LABEL_PLATE_PAD_X * 2);
-    drawPlate(
-      { x1: spec.cx - plateW / 2, y1: spec.top, x2: spec.cx + plateW / 2, y2: spec.top + spec.h },
-      bg,
-    );
+    const plate = { x1: spec.cx - plateW / 2, y1: spec.top, x2: spec.cx + plateW / 2, y2: spec.top + spec.h };
+    drawPlate(plate, bg);
+    // แผ่นรองของชิปต้องวาดก่อนตัวหนังสือ (ไม่งั้นต้องทับตัวหนังสือด้วยสีโปร่งซึ่งอ่านยากขึ้น)
+    let chip = null;
+    prepared.forEach((line, i) => {
+      if (!line.suffixWidth) return;
+      const y1 = spec.top + i * LABEL_LINE_H;
+      chip = { x1: spec.cx + line.width / 2 - line.suffixWidth, y1, x2: spec.cx + line.width / 2, y2: y1 + LABEL_PLATE_H };
+      if (chipBg) drawPlate(chip, chipBg);
+    });
     // ตัดข้อความไปแล้วข้างบน (พร้อมกันที่ให้ suffix) — **ห้ามตัดซ้ำ** ไม่งั้นรอบสองจะกินจากท้าย
     // ซึ่งคือ suffix ที่เพิ่งอุตส่าห์กันไว้ · `maxWidth` ของ fillText ยังเป็นตาข่ายชั้นสุดท้ายอยู่
     ctx.textAlign = "center";
@@ -599,18 +614,25 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
       ctx.fillStyle = line.fg;
       ctx.fillText(line.text, spec.cx, spec.top + i * LABEL_LINE_H + LABEL_TEXT_BASELINE, budget);
     });
+    return { plate, chip };
   }
 
   /**
    * ป้ายหัวโซน — ต่อท้ายด้วย `+n` เมื่อโซนนั้นมีตัวละครมากกว่าที่นั่งที่ใส่ป้ายได้ (spec §7.2)
    * ยัดป้ายเพิ่มจนล้นโซนคือสิ่งที่ทำให้ห้องถูกบังทั้งห้องมาแล้ว — จำนวนที่เหลือบอกที่หัวโซนแทน
+   *
+   * `+n` เป็น **ชิปที่กดได้**: มีแผ่นรองของตัวเองให้เห็นว่ากดได้ และคืน hitbox ออกไปให้ main.js
+   * เปิดรายชื่อตัวที่ซ่อนอยู่ — ตัวพวกนั้นยืนซ้อนกันที่นั่งสุดท้ายจนคลิกทีละตัวไม่ได้ (spec §7.5
+   * บอกว่าชื่อเต็มดูได้จากการคลิก ⇒ ต้องมีทางเข้าถึงทุกตัว ไม่ใช่แค่ตัวที่บังเอิญอยู่บนสุด)
+   * @returns {object[]} hitbox ของชิป `+n` (โซนที่ไม่ล้นไม่มี)
    */
   function drawZoneLabels(overflowByZone) {
+    const hitboxes = [];
     for (const id of ZONE_IDS) {
       const z = zones[id];
       const isApproval = id === "approval";
       const extra = overflowByZone[id] || 0;
-      drawFixedLabel(
+      const { chip } = drawFixedLabel(
         labels.zoneHeader[id],
         [
           {
@@ -626,13 +648,18 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
             : null,
         ].filter(Boolean),
         isApproval ? "rgba(74,58,18,.78)" : "rgba(0,0,0,.6)",
+        extra > 0 ? OVERFLOW_CHIP_BG : null,
       );
+      if (extra > 0 && chip) {
+        hitboxes.push({ kind: "overflow", id, x1: chip.x1 - 2, y1: chip.y1 - 2, x2: chip.x2 + 2, y2: chip.y2 + 2 });
+      }
     }
     drawFixedLabel(
       labels.browserNote,
       [{ text: "FIFO: มาก่อนได้ก่อน", font: "10px sans-serif", fg: "rgba(255,255,255,.85)" }],
       "rgba(0,0,0,.5)",
     );
+    return hitboxes;
   }
 
   /** โต๊ะ Browser แสดงป้ายชื่อผู้ถือเสมอ แม้ตัวถือจะไปยืนที่โซน Approval (P2 > P3 — spec §7.3) */
@@ -735,7 +762,7 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
   }
 
   /**
-   * วาดหนึ่งเฟรมเต็ม แล้วคืน hitbox สำหรับ click (ตัวละคร + ป้าย auto-pause)
+   * วาดหนึ่งเฟรมเต็ม แล้วคืน hitbox สำหรับ click (ตัวละคร + ป้าย auto-pause + ชิป `+n` ที่หัวโซน)
    * @param {ReturnType<import("./state.js").createRoomState>["getDrawList"]} drawList จาก state.getDrawList(now)
    * @param {number} hostNowMs เวลา host โดยประมาณ — ใช้คำนวณนาฬิกา (spec §5.6)
    * @param {{holder:string|null}} browserQueue
@@ -764,6 +791,10 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
     const hitboxes = [];
     for (const item of painterOrder) {
       drawCharacterSprite(item);
+      // ตัวที่ล้นที่นั่งไม่มีกรอบคลิกของตัวเอง: มันซ้อนพิกัดเดียวกันหมด กรอบจะทับกันเป็นตั้งแล้ว
+      // findHit คืนได้ตัวเดียวอยู่ดี (ตัวที่เหลือกลายเป็นตัวละครที่ไม่มีวันเปิดดูได้) — พวกนี้เข้าถึง
+      // ผ่านชิป `+n` ที่หัวโซนแทน ⇒ "ที่นั่งหนึ่งกรอบคลิกหนึ่ง" และทุกตัวในห้องมีทางเข้าถึงเสมอ
+      if (item.meta.overflow) continue;
       // กรอบคลิกล้อมตัวสไปรต์ ⇒ ต้องโตด้วย `zoom` เท่ากับตัวสไปรต์ ไม่งั้นห้องขยายแล้วคลิกไม่โดน
       hitboxes.push({
         kind: "character",
@@ -784,15 +815,17 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
 
     // ป้ายชื่อ (โซน + ตัวละคร) เป็น pass สุดท้ายเสมอ กันตัวละครแถวแรกบัง (spec §7.2)
     // ตัวที่ล้นที่นั่งของโซนไม่ได้ป้าย แต่ถูกนับเป็น +n ที่หัวโซน (ต้องนับก่อนวาดหัวโซน)
+    // นับจาก overflowGroups() ตัวเดียวกับที่การ์ด "+n" ใช้ลิสต์รายชื่อ ⇒ ตัวเลขกับรายชื่อ drift กันไม่ได้
     const overflowByZone = {};
-    for (const item of withSelection) {
-      if (!item.meta.overflow) continue;
-      overflowByZone[item.meta.zone] = (overflowByZone[item.meta.zone] || 0) + 1;
+    for (const [zone, list] of Object.entries(overflowGroups(withSelection))) {
+      overflowByZone[zone] = list.length;
     }
-    drawZoneLabels(overflowByZone);
+    const overflowHitboxes = drawZoneLabels(overflowByZone);
     drawCharacterLabels(withSelection, hostNowMs);
 
-    return [...hitboxes, ...scheduleHitboxes];
+    // เรียงจาก "สำคัญน้อย → มาก": findHit ไล่จากท้ายมาหน้า ⇒ ตัวละคร/ป้าย Schedule ชนะชิป +n
+    // เมื่อกรอบมันเหลื่อมกัน (หัวของตัวละครแถวบนสุดอยู่ใกล้แถบหัวโซนในบางโซน)
+    return [...overflowHitboxes, ...hitboxes, ...scheduleHitboxes];
   }
 
   return { draw, W, H };

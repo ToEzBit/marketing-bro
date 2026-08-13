@@ -8,7 +8,7 @@
  */
 import assert from "node:assert/strict";
 import { buildZones, worldPos, DOOR_SLOT, ROOM } from "./layout.js";
-import { createRoomState, truncateName, DESPAWN_MS } from "./state.js";
+import { createRoomState, overflowGroups, truncateName, DESPAWN_MS } from "./state.js";
 import { getClockInfo, createRenderer, VECTOR_FURNITURE_COLORS } from "./render.js";
 import { placeholderAssets } from "./assets.js";
 
@@ -472,6 +472,95 @@ check("โหมด placeholder วาดห้องที่มีคนอย
   });
   assert.equal(hitboxes.filter((h) => h.kind === "character").length, chars.length);
   assert.equal(hitboxes.filter((h) => h.kind === "schedule").length, 1);
+});
+
+console.log("\nทุกตัวละครในห้องต้องมีทางเปิดดูรายละเอียดได้จริง (#20 ข้อ 3)");
+
+/** snapshot ที่ "ล้นทุกโซน" — ทุกโซนมีคนมากกว่าที่นั่งของตัวเอง */
+function crowdedRoom() {
+  const chars = [];
+  const push = (n, make) => Array.from({ length: n }, (_, i) => chars.push(make(i)));
+  push(zones.lounge.slots.length + 3, (i) => baseChar({ id: `idle-${i}`, state: "idle" }));
+  push(zones.desks.slots.length + 3, (i) => baseChar({ id: `work-${i}`, state: "working" }));
+  push(zones.approval.slots.length + 2, (i) => baseChar({ id: `appr-${i}`, state: "approval", deadlineAt: NOW + 60_000 }));
+  push(zones.stopped.slots.length + 2, (i) => baseChar({ id: `stop-${i}`, state: "stopped" }));
+  push(zones.bug.slots.length + 2, (i) => baseChar({ id: `fail-${i}`, state: "failed" }));
+  const waiterIds = Array.from({ length: zones.browser.waiterSlots.length + 3 }, (_, i) => `wait-${i}`);
+  chars.push(baseChar({ id: "holder", state: "working" }));
+  for (const id of waiterIds) chars.push(baseChar({ id, kind: "run", state: "working" }));
+  const q = {
+    holder: "holder",
+    waiting: waiterIds.map((id, i) => ({ id, since: NOW - i * 1000, deadlineAt: NOW + 30_000 })),
+  };
+  const room = createRoomState(zones, { tilePx: 32 });
+  room.applySnapshot(snapshotOf(chars, q), NOW);
+  return { room, chars, q, drawList: room.getDrawList(NOW + 5000) };
+}
+
+check("★ ทุกตัวละคร = มีที่นั่งของตัวเอง หรืออยู่ในกลุ่ม +n ของโซนพอดีกลุ่มเดียว (ไม่มีตัวไหนตกสำรวจ)", () => {
+  const { chars, drawList } = crowdedRoom();
+  const groups = overflowGroups(drawList);
+  const hidden = Object.values(groups).flat().map((m) => m.id);
+  const seated = drawList.filter((d) => !d.meta.overflow).map((d) => d.id);
+  assert.equal(new Set(hidden).size, hidden.length, "ตัวเดียวห้ามโผล่สองกลุ่ม");
+  assert.deepEqual(
+    [...seated, ...hidden].sort(),
+    chars.map((c) => c.id).sort(),
+    "รวมกันแล้วต้องได้ตัวละครทุกตัวในห้องพอดี",
+  );
+  assert.ok(hidden.length > 0, "snapshot นี้ต้องมีตัวที่ล้นจริง ไม่งั้นเทสต์ไม่ได้ทดสอบอะไร");
+});
+
+check("★ กรอบคลิกที่ renderer คืนมา ครอบคนที่มีที่นั่งครบทุกตัว ตัวละ 1 กรอบ (ไม่มีกรอบซ้อนบังกันเอง)", () => {
+  const { drawList, q } = crowdedRoom();
+  const { hitboxes } = renderOnce(placeholderAssets(), { drawList, browserQueue: q });
+  const chars = hitboxes.filter((h) => h.kind === "character").map((h) => h.id);
+  const seated = drawList.filter((d) => !d.meta.overflow).map((d) => d.id);
+  assert.deepEqual(chars.sort(), seated.sort());
+  // ตัวที่ล้นต้องไม่มีกรอบของตัวเอง — ไม่งั้นกรอบจะซ้อนที่เดียวกันแล้วเปิดได้แค่ตัวบนสุด
+  const overflowIds = new Set(drawList.filter((d) => d.meta.overflow).map((d) => d.id));
+  assert.deepEqual(chars.filter((id) => overflowIds.has(id)), []);
+});
+
+check("★ ทุกโซนที่ล้นมีชิป +n ให้คลิก และคลิกแล้วได้ 'โซน' ที่มีรายชื่อตัวที่ซ่อนอยู่จริง", () => {
+  const { drawList, q } = crowdedRoom();
+  const { hitboxes } = renderOnce(placeholderAssets(), { drawList, browserQueue: q });
+  const groups = overflowGroups(drawList);
+  const chips = hitboxes.filter((h) => h.kind === "overflow");
+  assert.deepEqual(chips.map((c) => c.id).sort(), Object.keys(groups).sort());
+  for (const chip of chips) {
+    assert.ok(chip.x2 > chip.x1 && chip.y2 > chip.y1, `ชิปโซน ${chip.id} ต้องมีพื้นที่ให้คลิกจริง`);
+    assert.ok(groups[chip.id].length > 0);
+  }
+  // ชิปถูกใส่ไว้ก่อนกรอบตัวละคร ⇒ findHit (ไล่จากท้าย) ให้ตัวละครชนะเมื่อกรอบเหลื่อมกัน
+  const firstChar = hitboxes.findIndex((h) => h.kind === "character");
+  assert.ok(hitboxes.findIndex((h) => h.kind === "overflow") < firstChar);
+});
+
+check("รายชื่อในกลุ่ม +n พก 'ความหมายของโซน' มาครบ — คิว Browser ที่ซ่อนอยู่ยังบอกลำดับคิว/เส้นตายได้", () => {
+  const { drawList } = crowdedRoom();
+  const hidden = overflowGroups(drawList).browser || [];
+  assert.ok(hidden.length >= 1);
+  assert.deepEqual(
+    hidden.map((m) => m.queuePos),
+    [...hidden.map((m) => m.queuePos)].sort((a, b) => a - b),
+    "ต้องเรียงตามลำดับคิวจริง",
+  );
+  for (const meta of hidden) {
+    assert.equal(meta.role, "waiter");
+    assert.ok(meta.queuePos > zones.browser.waiterSlots.length, "ตัวที่ซ่อนคือคิวที่เลยช่องที่มี");
+    assert.equal(meta.browserDeadlineAt, NOW + 30_000, "เส้นตายของ Run ต้องยังตามมาด้วย");
+    assert.ok(meta.name && meta.id, "ต้องมีชื่อเต็ม/id ให้การ์ดเปิดต่อได้");
+  }
+});
+
+check("โซนที่ไม่ล้นไม่มีกลุ่ม +n และไม่มีชิปให้คลิก (ชิปต้องไม่โผล่มั่ว)", () => {
+  const room = createRoomState(zones, { tilePx: 32 });
+  room.applySnapshot(snapshotOf([baseChar({ id: "only", state: "idle" })]), NOW);
+  const drawList = room.getDrawList(NOW + 5000);
+  assert.deepEqual(overflowGroups(drawList), {});
+  const { hitboxes } = renderOnce(placeholderAssets(), { drawList });
+  assert.deepEqual(hitboxes.filter((h) => h.kind === "overflow"), []);
 });
 
 if (failures > 0) {
