@@ -755,8 +755,14 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
     ctx.strokeRect(3, 3, W - 6, H - 6);
 
     const withSelection = drawList.map((item) => ({ ...item, selected: item.id === selectedId }));
+    // ตัวที่ล้นที่นั่ง (`meta.overflow`) ยืนซ้อนที่นั่งสุดท้าย **พิกัดเดียวกันเป๊ะ** กับเจ้าของที่นั่ง ⇒ ต้องวาดไว้
+    // ใต้เสมอ ไม่งั้นสไปรต์/เลขคิวของตัวที่ไม่มีป้ายจะไปอยู่บนสุด แล้วถูกอ่านคู่กับป้ายของอีกคนเป็นข้อมูลผิด
+    // (เห็นชัดสุดที่คิว Browser: เลขคิวบนหัวเป็นของตัวที่ล้น แต่ชื่อใต้เท้าเป็นของเจ้าของช่อง)
+    const painterOrder = [...withSelection].sort(
+      (a, b) => a.y - b.y || Number(Boolean(b.meta.overflow)) - Number(Boolean(a.meta.overflow)),
+    );
     const hitboxes = [];
-    for (const item of withSelection) {
+    for (const item of painterOrder) {
       drawCharacterSprite(item);
       // กรอบคลิกล้อมตัวสไปรต์ ⇒ ต้องโตด้วย `zoom` เท่ากับตัวสไปรต์ ไม่งั้นห้องขยายแล้วคลิกไม่โดน
       hitboxes.push({

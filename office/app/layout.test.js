@@ -37,6 +37,7 @@ import {
   DOOR_SLOT,
   ROOM,
   TILE,
+  ANCHOR,
 } from "./layout.js";
 import { tilePxOf, PLACEHOLDER_TILE_SIZE } from "./assets.js";
 
@@ -536,10 +537,35 @@ check("approval เป็น radial 4 จุด รัศมี 3.1 tile รอ�
   }
 });
 
-check("browser มีโต๊ะผู้ถือ 1 + ช่องคิว 4", () => {
-  assert.equal(zones.browser.waiterSlots.length, 4);
+check("browser มีโต๊ะผู้ถือ 1 + ช่องคิว 2 (คิวยาวกว่านี้บอกเป็น +n ที่หัวโซน — #20)", () => {
+  assert.equal(zones.browser.waiterSlots.length, 2);
   assert.ok(zones.browser.holderSlot);
-  assert.equal(zones.browser.slots.length, 5); // holder + 4 คิว
+  assert.equal(zones.browser.slots.length, 3); // holder + 2 คิว
+});
+
+check("★ คิว Browser เป็นแถวเดียว และทั้งโซนมีไม่เกิน 2 แถว (สามแถวคือต้นเหตุที่ป้ายบังงานศิลป์)", () => {
+  const waiterRows = new Set(zones.browser.waiterSlots.map((s) => s.y));
+  assert.equal(waiterRows.size, 1, "ช่องคิวทุกช่องต้องอยู่แถวเดียวกัน");
+  const rows = new Set(zones.browser.slots.map((s) => s.y));
+  assert.ok(rows.size <= 2, `โซน browser มี ${rows.size} แถว — เกินที่พื้นที่รองรับได้`);
+  // ผู้ถืออยู่แถวบนสุดเสมอ (โต๊ะจริงของ tileset อยู่แถวนั้น และ P3 ต้องอ่านออกก่อนคิว)
+  assert.ok(zones.browser.holderSlot.y < zones.browser.waiterSlots[0].y);
+});
+
+check("★ ป้ายผู้ถือ Browser ไม่ทับป้ายของแถวคิว และเฉี่ยวตัวคิวได้ไม่เกินครึ่งบนของสไปรต์", () => {
+  for (const tilePx of [32, 38, 48, 64]) {
+    const holderLabel = slotLabelBox(zones.browser.holderSlot, tilePx);
+    for (const [i, slot] of zones.browser.waiterSlots.entries()) {
+      assert.equal(boxesOverlap(holderLabel, slotLabelBox(slot, tilePx)), false, `tilePx=${tilePx} คิว ${i}`);
+      // ป้ายผู้ถือต้องไม่ล้ำลงไปถึง "กลางตัว" ของคิว (จุดที่ผังเดิมพังคือกินทั้งหัวและลำตัว)
+      const foot = slot.y * tilePx;
+      const headTop = foot - ANCHOR.y * (tilePx / TILE); // จุดเท้าอยู่ที่ ANCHOR.y ของเฟรม (ดู drawSpriteFrame)
+      assert.ok(
+        holderLabel.y2 <= (headTop + foot) / 2,
+        `tilePx=${tilePx}: ป้ายผู้ถือกินลงไปเกินครึ่งตัวของคิว ${i}`,
+      );
+    }
+  }
 });
 
 console.log("\nzoneAndRoleFor() — precedence P1–P9 (spec §5.2 / §7.3)");
