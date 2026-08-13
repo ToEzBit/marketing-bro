@@ -66,6 +66,8 @@ const MIN_HEADLINE_WIDTH = 20;
 const LABEL_TEXT_BASELINE = 11;
 /** ชื่อท่าเดินใน manifest.character.animations — ท่าเดียวที่เล่นเป็นอนิเมชัน (spec §8.2 ตั้งชื่อไว้แบบนี้) */
 const WALK_ANIM = "walk";
+/** ท่ายืนเฉย ๆ — ท่าตกกลับเมื่อ manifest ไม่ได้บอกท่าของสถานะนั้นไว้ และท่าของคนที่ "ยืนรอ" (ดู poseFor) */
+const IDLE_ANIM = "idle";
 
 function pad2(n) {
   return String(n).padStart(2, "0");
@@ -511,9 +513,13 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
     const { manifest, folders } = assets; // ตัวชีตเองหยิบผ่าน resolveAnim()
     const meta = item.meta;
     const folder = folders[pickCharacterFolder(meta.id, folders.length)];
-    const stateDef = manifest.states?.[meta.state];
+    // ทุกตัวในโซน Browser **ยืน** ไม่ใช่นั่ง ทั้งที่ state ของมันเป็น working (P3/P4 มาก่อน P5/P6 แต่
+    // ไม่ได้เปลี่ยน state) — โซนนั้นไม่มีที่นั่งให้จริง: ผู้ถือนั่งเก้าอี้ไม่ได้เพราะป้ายจะไปทับหัวคิว
+    // (เหตุผลเต็มอยู่ที่ browser.holderSlot ใน layout.js) ส่วนช่องคิวมีเก้าอี้ไม่ครบทุกช่อง ถ้าใช้ท่านั่ง
+    // ตาม state ช่องที่ไม่มีเก้าอี้จะกลายเป็น "นั่งกลางอากาศ" ทันที
+    const pose = meta.zone === "browser" ? { anim: IDLE_ANIM } : manifest.states?.[meta.state];
     const walking = item.moving ? resolveAnim(folder, WALK_ANIM) : null;
-    const anim = walking || resolveAnim(folder, stateDef?.anim || "idle");
+    const anim = walking || resolveAnim(folder, pose?.anim || IDLE_ANIM);
     if (!anim) return; // ป้องกัน crash ถ้า manifest อ้างถึงไฟล์ที่โหลดไม่สำเร็จ
 
     const chr = manifest.character;
@@ -525,7 +531,7 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
     const anchorY = Number.isFinite(anchor[1]) ? anchor[1] : fh - 2;
     const frameIndex = walking
       ? animationFrameIndex(item.animMs, anim.def.frames, anim.def.fps)
-      : restFrameIndex(stateDef, anim.def.frames);
+      : restFrameIndex(pose, anim.def.frames);
     ctx.drawImage(
       anim.img,
       offX + frameIndex * fw,
@@ -731,7 +737,12 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
       if (item.meta.overflow) continue; // ล้นที่นั่งของโซน — นับรวมเป็น +n ที่หัวโซนแทน
       // clamp ใช้ได้จริงเฉพาะช่วงเดินเข้า/ออกทางประตู (ประตูอยู่ติดผนังล่าง ป้ายจะตกใต้ canvas ทั้งใบ)
       // — กับที่นั่งทุกที่มันเป็น no-op เพราะป้ายอยู่ในโซนตั้งแต่แรก (ยืนยันไว้ใน layout.test.js)
-      const box = clampBoxInto(characterLabelBox(item.x, item.y, tilePx), ROOM_LABEL_BOUNDS);
+      // `labelAbove` มาจากที่นั่งปลายทาง (state.js) ไม่ใช่คำนวณจาก item.y สด ๆ — ไม่งั้นป้ายจะเด้ง
+      // สลับบน/ล่างกลางทางที่ตัวละครเดินเข้าที่นั่งแถวล่างสุด
+      const box = clampBoxInto(
+        characterLabelBox(item.x, item.y, tilePx, item.labelAbove),
+        ROOM_LABEL_BOUNDS,
+      );
       const cx = (box.x1 + box.x2) / 2;
       const budget = box.x2 - box.x1 - LABEL_PLATE_PAD_X * 2;
       const clock = getClockInfo(item.meta, hostNowMs);

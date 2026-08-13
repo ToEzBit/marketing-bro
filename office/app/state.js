@@ -188,6 +188,9 @@ export function createRoomState(zones, options = {}) {
   function placeEntity(char, slot, zoneRole, now, overflow = false) {
     const target = worldPos(slot, tilePx);
     const meta = buildMeta(char, zoneRole, overflow);
+    // ที่นั่งบางที่ (แถวเก้าอี้ล่างสุดของโซน desks) ไม่เหลือที่ใต้เท้าให้ป้าย → ป้ายไปอยู่เหนือหัวแทน
+    // ธงมาจาก slot ปลายทางเสมอ ⇒ ระหว่างเดินเข้าที่นั่งป้ายก็อยู่ฝั่งเดิมตลอด ไม่เด้งสลับกลางทาง
+    const labelAbove = !!slot.labelAbove;
     let cache = posCache.get(char.id);
     if (!cache) {
       // เกิด: เดินเข้ามาจากประตูเสมอ (spec §7.4) ไม่ใช่ fade-in อยู่กับที่
@@ -203,6 +206,7 @@ export function createRoomState(zones, options = {}) {
         spawning: true,
         despawning: false,
         despawnT0: 0,
+        labelAbove,
         meta,
       };
       posCache.set(char.id, cache);
@@ -210,6 +214,7 @@ export function createRoomState(zones, options = {}) {
     }
     cache.despawning = false;
     cache.meta = meta;
+    cache.labelAbove = labelAbove;
     cache.dir = slot.dir || cache.dir;
     if (cache.to.x !== target.x || cache.to.y !== target.y) {
       glideTo(cache, target, now);
@@ -306,6 +311,8 @@ export function createRoomState(zones, options = {}) {
         // อยู่นิ่ง = ท่าตาม manifest.states เฟรมเดียว) — เวลานับจากจุดเริ่ม leg ปัจจุบัน
         moving,
         animMs: Math.max(0, now - cache.t0),
+        // ป้ายของที่นั่งนี้อยู่เหนือหัวแทนใต้เท้าไหม (ธงของ slot ปลายทาง — ดู placeEntity)
+        labelAbove: !!cache.labelAbove,
         meta: cache.meta,
       });
     }

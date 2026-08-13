@@ -33,6 +33,12 @@ import {
   CHAR_LABEL_W_TILES,
   CHAR_LABEL_H,
   CHAR_LABEL_TOP_OFFSET,
+  CHAR_SPRITE_TILES,
+  CHAR_HEAD_TOP_TILES,
+  CHAIR_SEAT_Y,
+  DESK_CHAIR_ROW,
+  DESK_ROW_PITCH,
+  labelAboveFor,
   DEFAULT_ZONE_RECTS,
   ZONE_IDS,
   DOOR_SLOT,
@@ -396,6 +402,67 @@ check("กล่องป้ายมีขนาดตายตัว ไม่
   assert.equal(characterLabelBox(0, 0, 64).x2 - characterLabelBox(0, 0, 64).x1, CHAR_LABEL_W_TILES * 64);
 });
 
+console.log("\nป้ายที่พลิกไปอยู่เหนือหัว (ที่นั่งที่ใต้เท้าไม่เหลือที่ให้ป้าย — #20)");
+
+check("characterLabelBox(above) วางป้ายไว้เหนือหัว ขนาดเท่าเดิมเป๊ะ และยังกึ่งกลางตัวละคร", () => {
+  const below = characterLabelBox(200, 300, 32);
+  const above = characterLabelBox(200, 300, 32, true);
+  assert.equal(above.x2 - above.x1, below.x2 - below.x1, "กว้างเท่าเดิม");
+  assert.equal(above.y2 - above.y1, below.y2 - below.y1, "สูงเท่าเดิม");
+  assert.equal((above.x1 + above.x2) / 2, 200);
+  assert.ok(above.y2 < 300 - CHAR_SPRITE_TILES * 32 + 1, "ขอบล่างต้องอยู่เหนือหัว ไม่ใช่กลางตัว");
+});
+
+check("★ แถวเก้าอี้ล่างสุดของ desks เท่านั้นที่พลิกป้ายขึ้นบน — ที่เหลือทั้งห้องยังอยู่ใต้เท้าเหมือนเดิม", () => {
+  const flipped = [];
+  for (const id of ZONE_IDS) {
+    zones[id].slots.forEach((s, i) => {
+      if (s.labelAbove) flipped.push(`${id}#${i}`);
+    });
+  }
+  assert.deepEqual(flipped, ["desks#4", "desks#5"]);
+  // และต้องพลิกเพราะ "ไม่มีทางเลือก" จริง ๆ ไม่ใช่เพราะความชอบ: ใต้เท้าไม่ลงที่ tilePx ไหนเลย
+  for (const i of [4, 5]) {
+    for (const tilePx of [32, 48, 64, 128]) {
+      assert.ok(
+        labelAboveFor(zones.desks, zones.desks.slots[i].y, tilePx),
+        `ที่นั่ง ${i}: ป้ายใต้เท้าลงได้ที่ tilePx=${tilePx} ⇒ ไม่ควรพลิก`,
+      );
+    }
+  }
+});
+
+check("★ การตัดสินว่าพลิกหรือไม่ ไม่ขึ้นกับขนาดจอ (ป้ายห้ามเด้งสลับบน/ล่างตอนย่อ-ขยายหน้าต่าง)", () => {
+  const flags = zones.desks.slots.map((s) => !!s.labelAbove);
+  for (const availW of [700, 1000, 1546, 2186, 2560, 3800]) {
+    const tilePx = chooseTilePx({ availW, availH: 2200 });
+    const rebuilt = buildZones();
+    assert.deepEqual(rebuilt.desks.slots.map((s) => !!s.labelAbove), flags, `tilePx=${tilePx}`);
+  }
+});
+
+check("★ ป้ายที่พลิกขึ้นบนต้องไม่ทับป้ายของแถวเหนือมัน และไม่ทับหัวโซน", () => {
+  for (const tilePx of [32, 38, 48, 64]) {
+    const boxes = zones.desks.slots.map((s) => slotLabelBox(s, tilePx));
+    const area = zoneLabelArea(zones.desks, tilePx);
+    for (const b of boxes) assert.ok(b.y1 >= area.y1, `tilePx=${tilePx}: ป้ายล้ำหัวโซน`);
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        assert.equal(boxesOverlap(boxes[i], boxes[j]), false, `tilePx=${tilePx}: ป้าย ${i} กับ ${j} ทับกัน`);
+      }
+    }
+  }
+});
+
+check("★ ป้ายที่พลิกขึ้นบนต้องอยู่เหนือ 'หัว' ของเจ้าของป้ายจริง ๆ ไม่ใช่ทับตัวมันเอง", () => {
+  for (const tilePx of [32, 48, 64]) {
+    for (const slot of zones.desks.slots.filter((s) => s.labelAbove)) {
+      const headTop = slot.y * tilePx - (CHAR_SPRITE_TILES - CHAR_HEAD_TOP_TILES) * tilePx;
+      assert.ok(slotLabelBox(slot, tilePx).y2 <= headTop, `tilePx=${tilePx}: ป้ายทับหัวเจ้าของเอง`);
+    }
+  }
+});
+
 check("★ ป้ายของ *ทุกที่นั่ง* ใน *ทุกโซน* อยู่ในกรอบโซนของตัวเอง (เกณฑ์หลักของ #20)", () => {
   const problems = labelFitReport(zones, TILE, 1);
   assert.deepEqual(problems, [], problems.map((p) => `${p.kind}/${p.zone}: ${p.detail}`).join("\n"));
@@ -549,6 +616,32 @@ check("desks เป็น grid 2×3 = 6 ที่นั่ง", () => {
   assert.equal(zones.desks.slots.length, 6);
 });
 
+check("★ ที่นั่งโซน desks ลงบน 'เก้าอี้จริง' ของผังห้องทุกตัว ไม่ใช่ลอยอยู่บนโต๊ะ (บั๊กภาพ #20)", () => {
+  // เก้าอี้ใน map.json ของชุด default อยู่ที่ tile (18,3) (21,3) (18,8) (21,8) (18,13) (21,13)
+  // ⇒ ที่นั่งต้องอยู่กลาง tile ตามแนวนอน และอยู่ที่ CHAIR_SEAT_Y ของแถวเก้าอี้ตามแนวตั้ง
+  const [rx, ry] = zones.desks.rect;
+  const chairRows = [0, 1, 2].map((i) => ry + DESK_CHAIR_ROW + i * DESK_ROW_PITCH);
+  assert.deepEqual(chairRows, [3, 8, 13], "แถวเก้าอี้ต้องตรงกับ map.json ของชุด default");
+  for (const [i, slot] of zones.desks.slots.entries()) {
+    const row = chairRows[Math.floor(i / 2)];
+    assert.ok(
+      Math.abs(slot.y - (row + CHAIR_SEAT_Y)) < 1e-9,
+      `ที่นั่ง ${i}: y=${slot.y} ไม่ได้อยู่บนเก้าอี้แถว ${row} (ต้องเป็น ${row + CHAIR_SEAT_Y})`,
+    );
+    assert.ok(Math.abs(((slot.x % 1) + 1) % 1 - 0.5) < 1e-9, `ที่นั่ง ${i}: x=${slot.x} ไม่ได้อยู่กลาง tile เก้าอี้`);
+    assert.ok(slot.x > rx && slot.x < rx + zones.desks.rect[2], `ที่นั่ง ${i} หลุดกรอบโซน`);
+  }
+});
+
+check("★ ที่นั่งยังคำนวณจาก rect จริง: rect ที่ map.json ให้มาเปลี่ยน ที่นั่งต้องเลื่อนตามทั้งชุด", () => {
+  const moved = buildZones({ desks: [10, 4, 6, 13] });
+  const base = buildZones();
+  for (const [i, slot] of moved.desks.slots.entries()) {
+    assert.equal(slot.x, base.desks.slots[i].x - 7, `ที่นั่ง ${i} ไม่ได้เลื่อนตามแกน x ของ rect`);
+    assert.equal(slot.y, base.desks.slots[i].y + 3, `ที่นั่ง ${i} ไม่ได้เลื่อนตามแกน y ของ rect`);
+  }
+});
+
 check("bug มี 3 ที่นั่ง (ทรงพีระมิด 2+1 เหมือน stopped)", () => {
   assert.equal(zones.bug.slots.length, 3);
 });
@@ -578,6 +671,29 @@ check("★ คิว Browser เป็นแถวเดียว และท�
   assert.ok(rows.size <= 2, `โซน browser มี ${rows.size} แถว — เกินที่พื้นที่รองรับได้`);
   // ผู้ถืออยู่แถวบนสุดเสมอ (โต๊ะจริงของ tileset อยู่แถวนั้น และ P3 ต้องอ่านออกก่อนคิว)
   assert.ok(zones.browser.holderSlot.y < zones.browser.waiterSlots[0].y);
+});
+
+check("★ ป้ายผู้ถือ Browser ต้องไม่ล้ำลงไปถึง 'หัว' ของคิว — เงื่อนไขที่ทำให้ผู้ถือยืนไม่ได้นั่ง (#20)", () => {
+  // เงื่อนไขนี้คือเหตุผลทั้งหมดที่โซน Browser ใช้ท่ายืน: ถ้าดันจุดเท้าผู้ถือลงไปที่เบาะเก้าอี้
+  // (by + DESK_CHAIR_ROW + CHAIR_SEAT_Y เหมือนโซน desks) ป้ายของมันจะเลื่อนลงไปคลุมหัวคิวทั้งหัว
+  // ⇒ ใครจะย้ายผู้ถือลงต้องแก้ผังคิวด้วย ไม่ใช่แค่ขยับตัวเลข
+  const headTopOf = (slot, tilePx) => slot.y * tilePx - (CHAR_SPRITE_TILES - CHAR_HEAD_TOP_TILES) * tilePx;
+  for (const tilePx of [32, 38, 48, 64]) {
+    const holderLabel = slotLabelBox(zones.browser.holderSlot, tilePx);
+    for (const [i, slot] of zones.browser.waiterSlots.entries()) {
+      assert.ok(
+        holderLabel.y2 <= headTopOf(slot, tilePx),
+        `tilePx=${tilePx}: ป้ายผู้ถือ (จบที่ ${holderLabel.y2}) ล้ำหัวคิว ${i} (เริ่มที่ ${headTopOf(slot, tilePx)})`,
+      );
+    }
+  }
+  // และเทสต์นี้ต้องจับได้จริงถ้ามีคนย้ายผู้ถือไปนั่งเก้าอี้
+  const seated = buildZones();
+  seated.browser.holderSlot = { ...seated.browser.holderSlot, y: seated.browser.rect[1] + DESK_CHAIR_ROW + CHAIR_SEAT_Y };
+  assert.ok(
+    slotLabelBox(seated.browser.holderSlot, TILE).y2 > headTopOf(seated.browser.waiterSlots[0], TILE),
+    "ถ้าย้ายผู้ถือไปนั่งเก้าอี้แล้วเทสต์ยังผ่าน แปลว่าเทสต์นี้ไม่ได้ทดสอบอะไร",
+  );
 });
 
 check("★ ป้ายผู้ถือ Browser ไม่ทับป้ายของแถวคิว และเฉี่ยวตัวคิวได้ไม่เกินครึ่งบนของสไปรต์", () => {
