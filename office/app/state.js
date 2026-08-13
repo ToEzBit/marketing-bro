@@ -93,7 +93,8 @@ function assignSlots(prevAssignment, idsInZone, slotCount) {
  *   `door` = ประตูของห้องขนาดจริงจาก map.json (ค่าเริ่มต้น DOOR_SLOT ของห้อง 32x16)
  */
 export function createRoomState(zones, options = {}) {
-  const tilePx = options.tilePx ?? TILE;
+  /** เปลี่ยนได้ตอนรันผ่าน setTilePx() เมื่อหน้าต่างเปลี่ยนขนาด (ห้องขยาย/หดตามพื้นที่ที่มี) */
+  let tilePx = options.tilePx ?? TILE;
   const door = options.door ?? DOOR_SLOT;
   /** id -> { from, to, cur, t0, dur, dir, spawning, despawning, despawnT0, meta } */
   const posCache = new Map();
@@ -291,10 +292,32 @@ export function createRoomState(zones, options = {}) {
     return localNow + clockOffsetMs;
   }
 
+  /**
+   * เปลี่ยน px ต่อ tile ตอนรัน (หน้าต่างเปลี่ยนขนาด / เข้า-ออกโหมดเต็มจอ)
+   *
+   * พิกัดทุกอันในแคชถูกคูณด้วยอัตราส่วนเดียวกันหมด ⇒ ตัวละครไปโผล่ที่นั่งเดิมของตัวเองในห้องขนาดใหม่
+   * **ทันที ไม่ต้อง glide** (ที่นั่งไม่ได้ย้าย ห้องแค่ใหญ่ขึ้น) และ leg ที่กำลังเดินอยู่ยังถูกต้องอยู่
+   * เพราะ `dur` คำนวณจากระยะทางหน่วย **tile** ซึ่งไม่เปลี่ยนตามสเกล
+   * @param {number} next px ต่อ tile ค่าใหม่
+   */
+  function setTilePx(next) {
+    const value = Number(next);
+    if (!(value > 0) || value === tilePx) return;
+    const ratio = value / tilePx;
+    tilePx = value;
+    for (const cache of posCache.values()) {
+      for (const p of [cache.from, cache.to, cache.cur]) {
+        p.x *= ratio;
+        p.y *= ratio;
+      }
+    }
+  }
+
   return {
     applySnapshot,
     getDrawList,
     estimateHostNow,
+    setTilePx,
     /** เปิดเผยไว้สำหรับเทสต์/debug เท่านั้น — โค้ด production ไม่ควรแก้ cache ตรง ๆ */
     _posCache: posCache,
   };

@@ -136,6 +136,50 @@ check("เริ่ม glide ใหม่จากตำแหน่งบนจ
   );
 });
 
+console.log("\nsetTilePx — ห้องขยาย/หดตามหน้าต่าง (#20)");
+
+check("ตัวละครไปโผล่ที่นั่งเดิมของห้องขนาดใหม่ทันที ไม่ glide ไม่เดินเข้าประตูใหม่", () => {
+  const room = createRoomState(zones, { tilePx: 32 });
+  room.applySnapshot(snapshotOf([baseChar({ id: "t1", state: "working" })]), NOW);
+  const settled = NOW + 60_000; // เดินถึงที่นั่งเรียบร้อยแล้ว
+  room.getDrawList(settled);
+  const before = { ...room._posCache.get("t1").cur };
+
+  room.setTilePx(64);
+  const cache = room._posCache.get("t1");
+  assert.deepEqual(cache.cur, { x: before.x * 2, y: before.y * 2 }, "พิกัดบนจอต้องคูณสองพร้อมห้อง");
+  // ที่นั่งเดิมในห้องใหญ่ = ปลายทางใหม่พอดี ⇒ applySnapshot รอบถัดไปต้องไม่สั่ง glide (ไม่มีอะไรขยับจริง)
+  room.applySnapshot(snapshotOf([baseChar({ id: "t1", state: "working" })]), settled + 1);
+  assert.equal(room._posCache.get("t1").dur, 0, "ต้องไม่มี glide เกิดขึ้นจากการเปลี่ยนขนาดห้อง");
+  assert.equal(room.getDrawList(settled + 1).length, 1, "ห้ามหายไปแล้วเดินเข้าประตูใหม่");
+});
+
+check("leg ที่กำลังเดินอยู่ยังถูกต้อง — ระยะทางวัดเป็น tile จึงไม่เปลี่ยนตามสเกล", () => {
+  const room = createRoomState(zones, { tilePx: 32 });
+  room.applySnapshot(snapshotOf([baseChar({ id: "t1", state: "idle" })]), NOW);
+  room.applySnapshot(snapshotOf([baseChar({ id: "t1", state: "working" })]), NOW + 60_000);
+  const before = room._posCache.get("t1");
+  const dur = before.dur;
+  const from = { ...before.from };
+  const to = { ...before.to };
+
+  room.setTilePx(48);
+  const after = room._posCache.get("t1");
+  assert.equal(after.dur, dur, "ระยะเวลาเดินต้องเท่าเดิม (ระยะทางเป็น tile ไม่ใช่ px)");
+  assert.deepEqual(after.from, { x: from.x * 1.5, y: from.y * 1.5 });
+  assert.deepEqual(after.to, { x: to.x * 1.5, y: to.y * 1.5 });
+});
+
+check("ค่าที่ไม่ถูกต้อง/ค่าเดิม ไม่แตะแคชเลย (กันพิกัดกลายเป็น NaN ทั้งห้อง)", () => {
+  const room = createRoomState(zones, { tilePx: 32 });
+  room.applySnapshot(snapshotOf([baseChar({ id: "t1", state: "working" })]), NOW);
+  const snapshotPos = { ...room._posCache.get("t1").to };
+  for (const bad of [0, -32, NaN, undefined, null, "x", 32]) {
+    room.setTilePx(bad);
+    assert.deepEqual(room._posCache.get("t1").to, snapshotPos, `setTilePx(${String(bad)}) ต้องไม่ทำอะไร`);
+  }
+});
+
 console.log("\napplySnapshot — หาย (despawn)");
 
 check("id ที่หายไปจาก snapshot ถูกสั่งเดินออกประตูแล้วค่อยลบออกจาก cache จริง (ไม่ใช่หายทันที)", () => {

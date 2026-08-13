@@ -96,17 +96,27 @@ function roundRectPath(ctx, x, y, w, h, r) {
 
 /**
  * @param {{canvas:HTMLCanvasElement, zones:object, assets:object,
- *          roomSize?:{cols:number,rows:number}}} args
- *   `assets.tilePx` = px ต่อ tile จริง, `roomSize` = ขนาดห้องจาก map.json (ค่าเริ่มต้น 32x16)
+ *          roomSize?:{cols:number,rows:number}, tilePx?:number}} args
+ *   `assets.tilePx` = ขนาด tile **ต้นฉบับ** บนจอจาก manifest, `tilePx` = ขนาดที่ห้องวาดจริงรอบนี้
+ *   (มาจาก chooseTilePx() ตามพื้นที่ที่มี — ค่าเริ่มต้นคือขนาดต้นฉบับ),
+ *   `roomSize` = ขนาดห้องจาก map.json (ค่าเริ่มต้น 32x16)
+ *
+ * renderer ไม่มี state ของตัวเอง (นอกจาก ctx) — เปลี่ยนขนาดห้องตอนรันด้วยการ **สร้างใหม่** ทั้งตัว
  */
-export function createRenderer({ canvas, zones, assets, roomSize }) {
+export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePxArg }) {
   const ctx = canvas.getContext("2d");
-  /** px ต่อ tile ที่ใช้จริงทั้งไฟล์นี้ — มาจาก manifest (tileSize x scale) ไม่ใช่ค่าคงที่ 32 */
-  const tilePx = assets.tilePx > 0 ? assets.tilePx : TILE;
+  /** px ต่อ tile ต้นฉบับตาม manifest (tileSize x scale) — ไม่ใช่ค่าคงที่ 32 (spec §8.2) */
+  const baseTilePx = assets.tilePx > 0 ? assets.tilePx : TILE;
+  /** px ต่อ tile ที่ใช้จริงทั้งไฟล์นี้ (ขยายให้เต็มพื้นที่จอแล้ว) */
+  const tilePx = tilePxArg > 0 ? tilePxArg : baseTilePx;
   const cols = roomSize?.cols > 0 ? roomSize.cols : ROOM.cols;
   const rows = roomSize?.rows > 0 ? roomSize.rows : ROOM.rows;
   /** ตัวคูณของรูปทรงเวกเตอร์ที่เขียนด้วยตัวเลข px สมัย tile 32px (เฟอร์นิเจอร์/dais/สปอตไลต์) */
   const UNIT = tilePx / TILE;
+  /** ตัวคูณของ "งานศิลป์ที่วาดตามขนาดต้นฉบับใน manifest" — สไปรต์ตัวละคร (เฟรม 64px) กับของที่ติดตัวมัน
+   *  ต้องโตตามห้อง ไม่งั้นห้องขยายแล้วคนตัวเท่าเดิมจะกลายเป็นมดเดินในห้องยักษ์
+   *  (ต่างจาก UNIT ที่อิงหน่วย 32px ของรูปทรงเวกเตอร์ — ชุด asset ที่ ship จริงสองค่านี้เท่ากันพอดี) */
+  const zoom = tilePx / baseTilePx;
   const W = cols * tilePx;
   const H = rows * tilePx;
   /** เรขาคณิตของป้ายตำแหน่งตายตัว — คำนวณครั้งเดียวจาก layout.js (แหล่งเดียวกับที่ layout.test.js ตรวจ) */
@@ -388,7 +398,9 @@ export function createRenderer({ canvas, zones, assets, roomSize }) {
     ctx.save();
     ctx.globalAlpha = alpha;
     ctx.translate(x, y);
-    ctx.scale(scale, scale);
+    // `zoom` = ห้องถูกวาดใหญ่กว่าขนาดต้นฉบับกี่เท่า — ทุกอย่างในบล็อกนี้ (เงา/สไปรต์/badge/วงเลือก)
+    // เขียนด้วยพิกัดขนาดต้นฉบับ จึงโตตามห้องพร้อมกันหมดด้วยการคูณตรงนี้ที่เดียว
+    ctx.scale(scale * zoom, scale * zoom);
 
     ctx.beginPath();
     ctx.ellipse(0, -2, 15, 5, 0, 0, Math.PI * 2);
@@ -719,13 +731,14 @@ export function createRenderer({ canvas, zones, assets, roomSize }) {
     const hitboxes = [];
     for (const item of withSelection) {
       drawCharacterSprite(item);
+      // กรอบคลิกล้อมตัวสไปรต์ ⇒ ต้องโตด้วย `zoom` เท่ากับตัวสไปรต์ ไม่งั้นห้องขยายแล้วคลิกไม่โดน
       hitboxes.push({
         kind: "character",
         id: item.id,
-        x1: item.x - 22,
-        y1: item.y - 68,
-        x2: item.x + 22,
-        y2: item.y + 6,
+        x1: item.x - 22 * zoom,
+        y1: item.y - 68 * zoom,
+        x2: item.x + 22 * zoom,
+        y2: item.y + 6 * zoom,
       });
     }
 
