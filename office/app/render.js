@@ -42,6 +42,17 @@ const ROLE_META = {
   waiter: { icon: "⏳", color: "#8b6cff" },
 };
 
+/**
+ * สีของ "เฟอร์นิเจอร์เวกเตอร์" ทุกชิ้น — รวมไว้ที่เดียวเพราะมันคือกลุ่มที่ถูกวาดเฉพาะโหมดไม่มีผังห้องจริง
+ * (ดู drawDecorations) เทสต์ใช้ค่าชุดนี้จับว่ามันไม่ถูกวาดทับ tile จริง โดยไม่ต้อง hard-code สีในเทสต์
+ */
+export const VECTOR_FURNITURE_COLORS = {
+  desk: "#5b4327",
+  screen: "#111318", // จอมอนิเตอร์ — ใช้ทั้งบนโต๊ะทำงานและที่โต๊ะ Browser
+  sofa: "#3b6a8f",
+  table: "#6b5220",
+};
+
 /** งบ (px) ขั้นต่ำที่ต้องเหลือให้ headline ถึงจะยอมพิมพ์ต่อท้ายนาฬิกา — น้อยกว่านี้พิมพ์ไปก็ได้แค่ "…"
  *  (และห้ามปล่อยให้งบเป็น 0 เพราะ clipTextToWidth มองค่า falsy ว่า "ไม่จำกัด" แล้วข้อความจะล้นกล่อง) */
 const MIN_HEADLINE_WIDTH = 20;
@@ -149,16 +160,17 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
   setupCanvas();
 
   // ---- เฟอร์นิเจอร์/ของประดับต่อโซน (วาดเสมอ ไม่ขึ้นกับว่ามีคนอยู่ไหม) ----
+  // รูปทรงเวกเตอร์ชุดนี้เป็น **fallback ของโหมดที่ไม่มีผังห้องจริง** เท่านั้น (ดู drawDecorations)
   // หมายเหตุ: ห้ามมี effect ที่ขึ้นกับเวลา (พัลส์/หมุน) นอกโซน Approval (spec §7.4) — จอมอนิเตอร์นี้
   // จึงเป็นสีนิ่ง ไม่ใช่ไฟกะพริบ
   function drawDesk(cx, cy) {
     atSlot(cx, cy, () => {
-      ctx.fillStyle = "#5b4327";
+      ctx.fillStyle = VECTOR_FURNITURE_COLORS.desk;
       ctx.fillRect(-20, -30, 40, 18);
       ctx.strokeStyle = "#2c2116";
       ctx.lineWidth = 1.5;
       ctx.strokeRect(-20, -30, 40, 18);
-      ctx.fillStyle = "#111318";
+      ctx.fillStyle = VECTOR_FURNITURE_COLORS.screen;
       ctx.fillRect(-8, -40, 16, 11);
       ctx.fillStyle = "rgba(120,200,255,0.45)";
       ctx.fillRect(-6, -38, 12, 7);
@@ -166,7 +178,7 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
   }
   function drawSofa(cx, cy) {
     atSlot(cx, cy, () => {
-      ctx.fillStyle = "#3b6a8f";
+      ctx.fillStyle = VECTOR_FURNITURE_COLORS.sofa;
       roundRectPath(ctx, -18, -16, 36, 20, 6);
       ctx.fill();
       ctx.fillStyle = "#2c4f6b";
@@ -175,7 +187,7 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
   }
   function drawTable(cx, cy) {
     atSlot(cx, cy, () => {
-      ctx.fillStyle = "#6b5220";
+      ctx.fillStyle = VECTOR_FURNITURE_COLORS.table;
       ctx.beginPath();
       ctx.ellipse(0, 0, 34, 20, 0, 0, Math.PI * 2);
       ctx.fill();
@@ -186,7 +198,7 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
   }
   function drawScreenProp(cx, cy) {
     atSlot(cx, cy, () => {
-      ctx.fillStyle = "#111318";
+      ctx.fillStyle = VECTOR_FURNITURE_COLORS.screen;
       ctx.fillRect(-14, -26, 28, 20);
       ctx.fillStyle = "rgba(139,108,255,0.55)";
       ctx.fillRect(-11, -23, 22, 14);
@@ -236,7 +248,9 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
     bug: "#3a2224",
   };
 
-  /** จุดเด่นที่สุดในห้อง (spec §7.2): dais ยกพื้น + สปอตไลต์พัลส์ + วงแหวนหมุน — เฉพาะโซน Approval */
+  /** จุดเด่นที่สุดในห้อง (spec §7.2): dais ยกพื้น + สปอตไลต์พัลส์ + วงแหวนหมุน — เฉพาะโซน Approval
+   *  เอฟเฟกต์ (แสง/วงแหวน/แท่นยกพื้น) วาดทุกโหมด ส่วน "โต๊ะประชุม" เป็นเฟอร์นิเจอร์ จึงวาดเฉพาะโหมด
+   *  ที่ไม่มีผังห้องจริงเหมือนโต๊ะ/โซฟาตัวอื่น (ดูเหตุผลใน drawDecorations) */
   function drawApprovalSpotlight(now) {
     const az = zones.approval;
     const pulse = 0.5 + 0.5 * Math.sin(now / 900);
@@ -273,7 +287,7 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
       ctx.stroke();
     });
 
-    drawTable(az.center.x, az.center.y);
+    if (!mapInfo) drawTable(az.center.x, az.center.y);
   }
 
   /**
@@ -344,11 +358,24 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
     }
   }
 
+  /**
+   * ของประดับของห้อง — แบ่งเป็นสองกลุ่มตามว่า "มีของจริงใน tileset ให้ซ้อนทับไหม"
+   *
+   * 1. **เฟอร์นิเจอร์** (โต๊ะทำงาน / โซฟา / จอโต๊ะ Browser / โต๊ะประชุม) วาดเฉพาะตอน **ไม่มีผังห้องจริง**
+   *    เพราะ tileset ที่ ship มาด้วยมีโต๊ะ เก้าอี้ ตู้ ต้นไม้ครบอยู่แล้ว วาดรูปทรงเวกเตอร์ทับอีกชั้น
+   *    ได้ "โต๊ะซ้อนโต๊ะ" (ก่อนหน้านี้เลี่ยงด้วยการจัดโต๊ะจริงให้ตรงตำแหน่ง blob เวกเตอร์พอดี — ทางแก้ชั่วคราว)
+   *    เงื่อนไขคือ `mapInfo` ไม่ใช่ `assets.mode` โดยตั้งใจ: ชุด sprite ที่ไม่ประกาศ map.json ก็ได้พื้นโซน
+   *    สีทึบแบบ placeholder เหมือนกัน (drawZoneFloors ใช้ตัวแบ่งเดียวกัน) ⇒ ต้องมีเฟอร์นิเจอร์ fallback ด้วย
+   * 2. **สัญญะของสถานะโซน** (รอยแตกของโซน bug / แถบกั้นของโซน stopped) วาดทุกโหมด — มันไม่ใช่เฟอร์นิเจอร์
+   *    และไม่มี tile ไหนใน tileset สื่อความหมายนี้แทน ตัดออกเมื่อไรคือทำ cue ของสถานะหายไปเฉย ๆ
+   */
   function drawDecorations(now) {
     drawApprovalSpotlight(now); // effect ที่ขึ้นกับเวลา (พัลส์/หมุน) มีได้เฉพาะจุดนี้จุดเดียว (spec §7.4)
-    for (const s of zones.desks.slots) drawDesk(s.x, s.y);
-    for (const s of zones.lounge.slots) drawSofa(s.x, s.y);
-    drawScreenProp(zones.browser.holderSlot.x, zones.browser.holderSlot.y);
+    if (!mapInfo) {
+      for (const s of zones.desks.slots) drawDesk(s.x, s.y);
+      for (const s of zones.lounge.slots) drawSofa(s.x, s.y);
+      drawScreenProp(zones.browser.holderSlot.x, zones.browser.holderSlot.y);
+    }
     drawCracks(zones.bug.rect);
     drawBarrier(zones.stopped.rect);
   }

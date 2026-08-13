@@ -7,9 +7,10 @@
  * ตาม spec §4.1 ข้อ 2 — ต้องอ่านจาก browserQueue.waiting[].deadlineAt เท่านั้น)
  */
 import assert from "node:assert/strict";
-import { buildZones, worldPos, DOOR_SLOT } from "./layout.js";
+import { buildZones, worldPos, DOOR_SLOT, ROOM } from "./layout.js";
 import { createRoomState, truncateName, DESPAWN_MS } from "./state.js";
-import { getClockInfo } from "./render.js";
+import { getClockInfo, createRenderer, VECTOR_FURNITURE_COLORS } from "./render.js";
+import { placeholderAssets } from "./assets.js";
 
 let failures = 0;
 
@@ -346,6 +347,131 @@ check("ตัวละครที่ createRoomState ประกอบ meta �
   assert.equal(item.meta.browserDeadlineAt, NOW + 20_000, "browserDeadlineAt ต้อง derive มาจาก browserQueue.waiting[]");
   const clock = getClockInfo(item.meta, NOW);
   assert.equal(clock.countdown, true);
+});
+
+// ---------------------------------------------------------------------------
+// renderer บน canvas ปลอม — เทสต์สิ่งที่ "วาดจริง" ได้โดยไม่ต้องมีเบราว์เซอร์
+//
+// ctx ปลอมบันทึกทุก op พร้อม fillStyle ณ ตอนนั้น ⇒ ตรวจได้ว่าอะไรถูกวาด/ไม่ถูกวาด และ draw() คืน
+// hitbox อะไรบ้าง (= "ผู้ใช้คลิกอะไรได้บ้าง" ซึ่งเป็นเกณฑ์รับของ #20 ข้อ 3)
+// ---------------------------------------------------------------------------
+
+/** canvas + ctx ปลอมที่บันทึก op ทั้งหมด — เมธอดที่ไม่รู้จักเป็น no-op เพื่อไม่ต้องไล่ stub ทีละอัน */
+function recordingCanvas() {
+  const ops = [];
+  const state = { fillStyle: null, strokeStyle: null, lineWidth: 1, font: "", textAlign: "", textBaseline: "", globalAlpha: 1, imageSmoothingEnabled: false };
+  const ctx = new Proxy(state, {
+    get(target, key) {
+      if (key in target) return target[key];
+      if (key === "measureText") return (text) => ({ width: String(text).length * 6 });
+      if (key === "createRadialGradient") return () => ({ addColorStop() {} });
+      return (...args) => ops.push({ op: String(key), args, fillStyle: target.fillStyle });
+    },
+    set(target, key, value) {
+      target[key] = value;
+      return true;
+    },
+  });
+  return { canvas: { width: 0, height: 0, style: {}, getContext: () => ctx }, ops };
+}
+
+/** ชุด asset "sprites + map.json" ขั้นต่ำ — โครงเดียวกับที่ tryLoadSpriteSet() ของ assets.js คืนจริง */
+function spriteAssets() {
+  const image = { naturalWidth: 320, width: 320 };
+  return {
+    mode: "sprites",
+    manifest: {
+      character: {
+        frameSize: [64, 64],
+        anchor: [32, 62],
+        offset: [0, 0],
+        directions: ["up", "left", "down", "right"],
+        folders: ["01"],
+        animations: { idle: { file: "idle.png", frames: 2, fps: 3 }, walk: { file: "walk.png", frames: 9, fps: 12 }, sit: { file: "sit.png", frames: 3, fps: 1 } },
+      },
+      states: { idle: { anim: "sit" }, working: { anim: "sit" }, approval: { anim: "idle" }, failed: { anim: "idle" }, stopped: { anim: "sit" } },
+      room: { tileSize: 32, scale: 1 },
+    },
+    tileset: image,
+    map: {
+      width: ROOM.cols,
+      height: ROOM.rows,
+      tilewidth: 32,
+      tileheight: 32,
+      tilesets: [{ firstgid: 1 }],
+      layers: [{ type: "tilelayer", name: "floor", width: ROOM.cols, height: ROOM.rows, data: new Array(ROOM.cols * ROOM.rows).fill(1) }],
+    },
+    characterImages: { "01": { idle: image, walk: image, sit: image } },
+    frameSize: [64, 64],
+    anchor: [32, 62],
+    tileSize: 32,
+    roomScale: 1,
+    tilePx: 32,
+    folders: ["01"],
+  };
+}
+
+/** วาดหนึ่งเฟรมด้วย asset ที่กำหนด แล้วคืน op ที่บันทึกไว้ + hitbox ที่ draw() คืนมา */
+function renderOnce(assets, { drawList = [], browserQueue = { holder: null, waiting: [] }, autoPaused = [], selectedId = null } = {}) {
+  globalThis.window = globalThis.window || { devicePixelRatio: 1 }; // render.js อ่าน devicePixelRatio ตอนตั้ง canvas
+  const { canvas, ops } = recordingCanvas();
+  const renderer = createRenderer({ canvas, zones, assets, roomSize: ROOM, tilePx: assets.tilePx });
+  const hitboxes = renderer.draw(drawList, NOW, browserQueue, autoPaused, selectedId, 0);
+  return { ops, hitboxes };
+}
+
+const FURNITURE_COLORS = Object.values(VECTOR_FURNITURE_COLORS);
+
+console.log("\nเฟอร์นิเจอร์เวกเตอร์ = fallback ของโหมดที่ไม่มีผังห้องจริงเท่านั้น (#20 ข้อ 1)");
+
+check("ชุดที่มีผังห้องจริง: ไม่มีเฟอร์นิเจอร์เวกเตอร์ชิ้นไหนถูกวาดทับ tile เลย (เลิก 'โต๊ะซ้อนโต๊ะ')", () => {
+  const { ops } = renderOnce(spriteAssets());
+  const drawn = [...new Set(ops.filter((o) => FURNITURE_COLORS.includes(o.fillStyle)).map((o) => o.fillStyle))];
+  assert.deepEqual(drawn, [], `ยังวาดเฟอร์นิเจอร์เวกเตอร์สี ${drawn.join(", ")} ทับผังห้องจริง`);
+  assert.ok(ops.some((o) => o.op === "drawImage"), "ต้องวาด tile จากชีตจริงแทน");
+});
+
+check("โหมด placeholder (ไม่มี asset เลย): เฟอร์นิเจอร์เวกเตอร์ต้องยังอยู่ครบทุกชิ้น", () => {
+  const { ops } = renderOnce(placeholderAssets());
+  const drawn = new Set(ops.filter((o) => FURNITURE_COLORS.includes(o.fillStyle)).map((o) => o.fillStyle));
+  for (const [name, color] of Object.entries(VECTOR_FURNITURE_COLORS)) {
+    assert.ok(drawn.has(color), `โหมด placeholder ต้องยังวาด ${name} (${color})`);
+  }
+  assert.ok(!ops.some((o) => o.op === "drawImage"), "โหมด placeholder ไม่มีรูปให้วาด");
+});
+
+check("สัญญะของสถานะโซน (รอยแตก bug / แถบกั้น stopped) ยังวาดทั้งสองโหมด — ไม่ใช่เฟอร์นิเจอร์", () => {
+  for (const assets of [spriteAssets(), placeholderAssets()]) {
+    const { ops } = renderOnce(assets);
+    assert.ok(
+      ops.some((o) => o.op === "setLineDash" && Array.isArray(o.args[0]) && o.args[0].length === 2),
+      `โหมด ${assets.mode}: แถบกั้นโซน stopped หายไป`,
+    );
+    assert.ok(ops.some((o) => o.op === "stroke"), `โหมด ${assets.mode}: รอยแตกโซน bug หายไป`);
+  }
+});
+
+check("โหมด placeholder วาดห้องที่มีคนอยู่ครบทุกโซนได้โดยไม่พัง (ฟีเจอร์ต้องครบเท่าโหมด sprites)", () => {
+  const room = createRoomState(zones, { tilePx: 32 });
+  const chars = [
+    baseChar({ id: "a", state: "idle" }),
+    baseChar({ id: "b", state: "working" }),
+    baseChar({ id: "c", state: "approval", deadlineAt: NOW + 60_000 }),
+    baseChar({ id: "d", state: "failed" }),
+    baseChar({ id: "e", state: "stopped" }),
+    baseChar({ id: "hold", state: "working" }),
+    baseChar({ id: "wait", state: "working" }),
+  ];
+  const q = { holder: "hold", waiting: [{ id: "wait", since: NOW, deadlineAt: null }] };
+  room.applySnapshot(snapshotOf(chars, q), NOW);
+  const drawList = room.getDrawList(NOW + 5000);
+  const { hitboxes } = renderOnce(placeholderAssets(), {
+    drawList,
+    browserQueue: q,
+    autoPaused: [{ id: "sch-1", name: "รายงานเช้า", consecutiveFailures: 3, nextRunAt: NOW }],
+  });
+  assert.equal(hitboxes.filter((h) => h.kind === "character").length, chars.length);
+  assert.equal(hitboxes.filter((h) => h.kind === "schedule").length, 1);
 });
 
 if (failures > 0) {
