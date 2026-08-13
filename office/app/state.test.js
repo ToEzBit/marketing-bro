@@ -208,6 +208,52 @@ check("id ซ้ำกันข้าม sessions/outcomeFeed ใช้ตัว
   assert.equal(drawn.filter((d) => d.id === "dup").length, 1);
 });
 
+console.log("\nโซนล้น (§7.2) — ตัวที่ไม่เหลือที่นั่งถูกทำเครื่องหมาย overflow เพื่อไม่ให้ยัดป้ายจนล้นห้อง");
+
+check("ตัวละครเท่ากับจำนวนที่นั่งพอดี ไม่มีใครเป็น overflow", () => {
+  const room = createRoomState(zones);
+  const chars = Array.from({ length: zones.lounge.slots.length }, (_, i) =>
+    baseChar({ id: `idle-${i}`, state: "idle" }),
+  );
+  room.applySnapshot(snapshotOf(chars), NOW);
+  const drawn = room.getDrawList(NOW);
+  assert.equal(drawn.length, chars.length);
+  assert.equal(drawn.filter((d) => d.meta.overflow).length, 0);
+});
+
+check("ตัวละครมากกว่าที่นั่ง: ส่วนเกินเป็น overflow ทุกตัว ที่เหลือได้ที่นั่งของตัวเองครบ", () => {
+  const room = createRoomState(zones);
+  const seats = zones.lounge.slots.length;
+  const extra = 7;
+  const chars = Array.from({ length: seats + extra }, (_, i) => baseChar({ id: `idle-${i}`, state: "idle" }));
+  room.applySnapshot(snapshotOf(chars), NOW);
+  // ดูหลังเดินเข้าห้องเสร็จแล้ว (ตอน NOW ทุกตัวยังยืนซ้อนกันอยู่ที่ประตู)
+  const drawn = room.getDrawList(NOW + 3000);
+  assert.equal(drawn.filter((d) => d.meta.overflow).length, extra, "จำนวน overflow ต้องเท่ากับส่วนที่ล้นจริง");
+  const seated = drawn.filter((d) => !d.meta.overflow);
+  assert.equal(seated.length, seats);
+  // ตัวที่ได้ที่นั่งต้องอยู่กันคนละที่จริง ๆ (ไม่ใช่ยัดที่นั่งสุดท้ายรวมกันเหมือนพฤติกรรมเดิม)
+  assert.equal(new Set(seated.map((d) => `${d.x},${d.y}`)).size, seats);
+});
+
+check("คิว Browser ที่ยาวเกินช่องคิว: ตัวที่เกินเป็น overflow ส่วนผู้ถือไม่มีวันเป็น overflow", () => {
+  const room = createRoomState(zones);
+  const waiterCount = zones.browser.waiterSlots.length;
+  const ids = Array.from({ length: waiterCount + 2 }, (_, i) => `w-${i}`);
+  const q = {
+    holder: "holder-1",
+    waiting: ids.map((id, i) => ({ id, since: NOW - i * 1000, deadlineAt: null })),
+  };
+  const chars = [baseChar({ id: "holder-1", state: "working" }), ...ids.map((id) => baseChar({ id, state: "working" }))];
+  room.applySnapshot(snapshotOf(chars, q), NOW);
+  const drawn = room.getDrawList(NOW);
+  assert.equal(drawn.find((d) => d.id === "holder-1").meta.overflow, false);
+  assert.equal(drawn.filter((d) => d.meta.overflow).length, 2);
+  for (let i = 0; i < waiterCount; i++) {
+    assert.equal(drawn.find((d) => d.id === `w-${i}`).meta.overflow, false, `คิวที่ ${i + 1} ต้องได้ช่องของตัวเอง`);
+  }
+});
+
 console.log("\nนาฬิกา (spec §5.6) — countdown เฉพาะ approval และ Run ที่รอคิว Browser เท่านั้น");
 
 check("approval มี deadlineAt จริง → countdown", () => {

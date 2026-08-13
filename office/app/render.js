@@ -22,7 +22,11 @@ import {
   pickCharacterFolder,
   tileLayersOf,
   animationFrameIndex,
-  resolveLabelShift,
+  characterLabelBox,
+  fixedLabels,
+  LABEL_LINE_H,
+  LABEL_PLATE_H,
+  LABEL_PLATE_PAD_X,
 } from "./layout.js";
 
 const STATE_META = {
@@ -37,26 +41,11 @@ const ROLE_META = {
   waiter: { icon: "⏳", color: "#8b6cff" },
 };
 
-/** กว้างสูงสุด (px) ของป้ายชื่อตัวละครบนจอ — 108px ≈ ระยะห่างจริงระหว่างที่นั่ง 2 คอลัมน์ของ lounge/desks
- *  นี่เป็นแค่ "เพดานความกว้าง" ไม่ใช่กลไกกันป้ายทับกันแล้ว: โซน grid 3 คอลัมน์ (stopped/bug ห่างกัน
- *  ~54px) และคิว Browser (~58px) แคบเกินกว่าที่การตัดข้อความจะช่วยได้ เพราะลำพังนาฬิกาท้ายป้ายก็กิน
- *  เกินระยะนั้นแล้ว — ตัวที่กันทับจริงคือ pass จัดวางที่ดันป้ายที่ชนกันลงทีละแถว (ดู drawCharacterLabels) */
-const CHARACTER_LABEL_MAX_WIDTH = 108;
-/** ป้ายชื่อผู้ถือ Browser ที่โต๊ะ (บรรทัดเดียว ยาวกว่าปกติเพราะมีคำนำ/ต่อท้าย) กว้างได้เกือบเต็มโซน */
-const BROWSER_HOLDER_LABEL_MAX_WIDTH = 176;
-/** งบ (px) ขั้นต่ำที่ต้องเหลือให้ตัวข้อความหลักเสมอ แม้ `suffix` จะกว้างผิดคาด — กัน budget เหลือ 0
- *  แล้ว clipTextToWidth มองว่า "ไม่จำกัด" (`!maxWidth`) ซึ่งจะทำให้ป้ายกลับไปทับกันเองอีก */
-const MIN_LABEL_TEXT_WIDTH = 24;
-/** ระยะบรรทัดในป้ายหลายบรรทัด + ความสูงแผ่นรองต่อบรรทัด (px) */
-const LABEL_LINE_H = 14;
-const LABEL_PLATE_H = 15;
-const LABEL_PLATE_PAD_X = 5;
-/** จำนวนครั้งสูงสุดที่ยอมดันป้ายลงเพื่อหลบของเดิม (เกินกว่านี้ยอมให้ทับ ดีกว่าวนหาไม่จบ) */
-const LABEL_MAX_PUSH = 10;
-/** ช่องว่างขั้นต่ำระหว่างแผ่นป้ายสองอัน ก่อนจะถือว่า "ชน" */
-const LABEL_GAP = 2;
-/** ดันเกินระยะนี้แล้วป้ายเริ่มอยู่ห่างจากหัวตัวละครจนไม่รู้ว่าเป็นของใคร — ลากเส้นบาง ๆ โยงให้ */
-const LABEL_LEADER_MIN_SHIFT = 8;
+/** งบ (px) ขั้นต่ำที่ต้องเหลือให้ headline ถึงจะยอมพิมพ์ต่อท้ายนาฬิกา — น้อยกว่านี้พิมพ์ไปก็ได้แค่ "…"
+ *  (และห้ามปล่อยให้งบเป็น 0 เพราะ clipTextToWidth มองค่า falsy ว่า "ไม่จำกัด" แล้วข้อความจะล้นกล่อง) */
+const MIN_HEADLINE_WIDTH = 20;
+/** baseline ของข้อความบรรทัดแรก วัดจากขอบบนของกล่องป้าย (แผ่นรองสูง 15px ฟอนต์ ~10px) */
+const LABEL_TEXT_BASELINE = 11;
 /** ชื่อท่าเดินใน manifest.character.animations — ท่าเดียวที่เล่นเป็นอนิเมชัน (spec §8.2 ตั้งชื่อไว้แบบนี้) */
 const WALK_ANIM = "walk";
 
@@ -119,6 +108,8 @@ export function createRenderer({ canvas, zones, assets, roomSize }) {
   const UNIT = tilePx / TILE;
   const W = cols * tilePx;
   const H = rows * tilePx;
+  /** เรขาคณิตของป้ายตำแหน่งตายตัว — คำนวณครั้งเดียวจาก layout.js (แหล่งเดียวกับที่ layout.test.js ตรวจ) */
+  const labels = fixedLabels(zones, tilePx);
 
   function tileRect([x, y, w, h]) {
     return [x * tilePx, y * tilePx, w * tilePx, h * tilePx];
@@ -513,135 +504,109 @@ export function createRenderer({ canvas, zones, assets, roomSize }) {
   }
 
   /**
-   * เตรียมบรรทัดของป้ายให้พร้อมวาด: ตัดข้อความ **ครั้งเดียว** แล้วจำทั้งสตริงสุดท้ายและความกว้างจริงไว้
-   * (สำคัญ: ต้องวัดกับสตริงเดียวกับที่จะวาด ไม่งั้นกรอบที่เอาไปกันป้ายชนกันจะไม่ตรงกับพิกเซลที่เห็น)
-   * แต่ละบรรทัดตั้ง `maxWidth` (px) ได้ และ `suffix` คือส่วนท้ายที่ต้องรอดจากการตัดเสมอ (นาฬิกา)
+   * วาดแผ่นรองสีทึบตามกล่องที่ให้มา **เป๊ะ ๆ** (spec §7.2 — แผ่นรองกันตัวหนังสือโดนลายพื้นห้องกลืน)
+   * กล่องที่วาดกับกล่องที่ layout.js/เทสต์ตรวจต้องเป็นก้อนเดียวกันเสมอ ไม่ใช่คนละสูตร
    */
-  function layoutLabel(lines, opts = {}) {
-    const { bold = false, sub = false } = opts;
-    const prepared = [];
-    let widest = 0;
-    for (const line of lines) {
-      if (!line || (!line.text && !line.suffix)) continue;
-      const font =
-        line.font || (bold ? "bold 12px sans-serif" : sub ? "10px sans-serif" : "600 11px sans-serif");
-      ctx.font = font;
-      // ตัดเฉพาะ `line.text` ในงบที่เหลือหลังกันที่ให้ `suffix` — ถ้าเอาสองส่วนมาต่อกันก่อนแล้วค่อยตัด
-      // ชื่อเธรดภาษาไทยความยาวปกติจะกินงบ 108px หมดตั้งแต่ชื่อ แล้วนาฬิกาซึ่งอยู่ท้ายสุดจะถูกตัดทิ้ง
-      // ทุกป้ายในห้อง (สังเกตว่า `ctx.font` ต้องถูกตั้งก่อนวัดเสมอ)
-      const suffix = line.suffix || "";
-      const budget = line.maxWidth
-        ? Math.max(MIN_LABEL_TEXT_WIDTH, line.maxWidth - ctx.measureText(suffix).width)
-        : line.maxWidth;
-      const text = clipTextToWidth(ctx, line.text || "", budget) + suffix;
-      const w = ctx.measureText(text).width;
-      prepared.push({ font, text, w, fg: line.fg, bg: line.bg });
-      if (w > widest) widest = w;
-    }
-    return { lines: prepared, width: widest + LABEL_PLATE_PAD_X * 2 };
+  function drawPlate(box, bg) {
+    ctx.fillStyle = bg;
+    roundRectPath(ctx, box.x1, box.y1, box.x2 - box.x1, box.y2 - box.y1, 5);
+    ctx.fill();
   }
 
-  /** กรอบที่ป้าย (ที่ layoutLabel เตรียมไว้) จะกินจริงเมื่อวาดที่ (cx, y) — ใช้กันป้ายชนกัน */
-  function labelBox(cx, y, prepared) {
-    const rows = Math.max(0, prepared.lines.length - 1);
-    return {
-      x1: cx - prepared.width / 2,
-      x2: cx + prepared.width / 2,
-      y1: y - 12,
-      y2: y - 12 + rows * LABEL_LINE_H + LABEL_PLATE_H,
-    };
-  }
-
-  /** วาดป้ายที่เตรียมไว้แล้ว — แผ่นรองสีทึบกันโดนบัง (spec §7.2 บั๊กที่เจอใน prototype) */
-  function drawPreparedLabel(cx, y, prepared, opts = {}) {
-    const { fg = "rgba(255,255,255,.92)", bg = "rgba(0,0,0,.6)" } = opts;
+  /**
+   * วาดข้อความหนึ่งบรรทัดกึ่งกลาง `cx` โดยรับประกันว่าไม่ล้นกล่อง: ตัดด้วย … ก่อน แล้วยังส่ง
+   * `maxWidth` ให้ fillText เป็นตาข่ายชั้นสุดท้าย (ฟอนต์ที่ผู้ใช้มีไม่เท่ากันทุกเครื่อง)
+   */
+  function drawClippedLine(text, cx, baseline, budget, font, fill) {
+    ctx.font = font;
+    ctx.fillStyle = fill;
     ctx.textAlign = "center";
-    let cursorY = y;
-    for (const line of prepared.lines) {
+    ctx.fillText(clipTextToWidth(ctx, text, budget), cx, baseline, budget);
+  }
+
+  /**
+   * ป้ายที่ตำแหน่งตายตัว (หัวโซน / FIFO / ผู้ถือ Browser / auto-pause) — วาดจาก spec ของ layout.js
+   * `spec.w` คือความกว้างสูงสุด; แผ่นรองย่อตามข้อความจริงแต่ไม่มีวันเกิน ⇒ อยู่ในกรอบโซนเสมอ
+   */
+  function drawFixedLabel(spec, lines, bg) {
+    const budget = spec.w - LABEL_PLATE_PAD_X * 2;
+    let widest = 0;
+    const prepared = lines.map((line) => {
       ctx.font = line.font;
-      ctx.fillStyle = line.bg || bg;
-      roundRectPath(
-        ctx,
-        cx - line.w / 2 - LABEL_PLATE_PAD_X,
-        cursorY - 12,
-        line.w + LABEL_PLATE_PAD_X * 2,
-        LABEL_PLATE_H,
-        5,
+      const text = clipTextToWidth(ctx, line.text, budget);
+      const w = Math.min(budget, ctx.measureText(text).width);
+      if (w > widest) widest = w;
+      return { ...line, text };
+    });
+    const plateW = Math.min(spec.w, widest + LABEL_PLATE_PAD_X * 2);
+    drawPlate(
+      { x1: spec.cx - plateW / 2, y1: spec.top, x2: spec.cx + plateW / 2, y2: spec.top + spec.h },
+      bg,
+    );
+    prepared.forEach((line, i) => {
+      drawClippedLine(
+        line.text,
+        spec.cx,
+        spec.top + i * LABEL_LINE_H + LABEL_TEXT_BASELINE,
+        budget,
+        line.font,
+        line.fg,
       );
-      ctx.fill();
-      ctx.fillStyle = line.fg || fg;
-      ctx.fillText(line.text, cx, cursorY);
-      cursorY += LABEL_LINE_H;
-    }
+    });
   }
 
-  /** วาดป้ายเดี่ยว (ใช้ทั้งป้ายโซนและป้ายอื่นที่ตำแหน่งตายตัว) — คืนกรอบที่กินไปเพื่อให้ป้ายตัวละครหลบ */
-  function drawLabelPlate(cx, y, lines, opts = {}) {
-    const prepared = layoutLabel(lines, opts);
-    drawPreparedLabel(cx, y, prepared, opts);
-    return labelBox(cx, y, prepared);
-  }
-
-  /** ป้ายโซนทั้งหมด — คืนกรอบทุกอันเพื่อให้ป้ายตัวละครหลบ (spec §7.2: ป้ายโซนต้องอ่านออกเสมอ) */
-  function drawZoneLabels() {
-    const boxes = [];
+  /**
+   * ป้ายหัวโซน — ต่อท้ายด้วย `+n` เมื่อโซนนั้นมีตัวละครมากกว่าที่นั่งที่ใส่ป้ายได้ (spec §7.2)
+   * ยัดป้ายเพิ่มจนล้นโซนคือสิ่งที่ทำให้ห้องถูกบังทั้งห้องมาแล้ว — จำนวนที่เหลือบอกที่หัวโซนแทน
+   */
+  function drawZoneLabels(overflowByZone) {
     for (const id of ZONE_IDS) {
       const z = zones[id];
-      const [x, y, w] = tileRect(z.rect);
       const isApproval = id === "approval";
-      boxes.push(drawLabelPlate(x + w / 2, y + (isApproval ? 20 : 16), [
-        {
-          text: `${z.icon} ${z.label}`,
-          font: isApproval ? "bold 15px sans-serif" : "600 12px sans-serif",
-          fg: isApproval ? "#ffe6a8" : "rgba(255,255,255,.92)",
-          bg: isApproval ? "rgba(74,58,18,.78)" : "rgba(0,0,0,.55)",
-        },
-        isApproval
-          ? {
-              text: "จุดที่ต้องการคนตัดสินใจ",
-              font: "11px sans-serif",
-              fg: "rgba(255,230,168,.95)",
-              bg: "rgba(74,58,18,.65)",
-            }
-          : null,
-      ].filter(Boolean)));
-    }
-    {
-      const [x, y, w, h] = tileRect(zones.browser.rect);
-      boxes.push(
-        drawLabelPlate(x + w / 2, y + h - 6, [
-          { text: "FIFO: มาก่อนได้ก่อน", font: "10px sans-serif", bg: "rgba(0,0,0,.5)", fg: "rgba(255,255,255,.85)" },
-        ]),
+      const extra = overflowByZone[id] || 0;
+      const head = `${z.icon} ${z.label}${extra > 0 ? `  +${extra}` : ""}`;
+      drawFixedLabel(
+        labels.zoneHeader[id],
+        [
+          {
+            text: head,
+            font: isApproval ? "bold 15px sans-serif" : "600 12px sans-serif",
+            fg: isApproval ? "#ffe6a8" : "rgba(255,255,255,.92)",
+          },
+          isApproval
+            ? { text: "จุดที่ต้องการคนตัดสินใจ", font: "11px sans-serif", fg: "rgba(255,230,168,.95)" }
+            : null,
+        ].filter(Boolean),
+        isApproval ? "rgba(74,58,18,.78)" : "rgba(0,0,0,.6)",
       );
     }
-    return boxes;
+    drawFixedLabel(
+      labels.browserNote,
+      [{ text: "FIFO: มาก่อนได้ก่อน", font: "10px sans-serif", fg: "rgba(255,255,255,.85)" }],
+      "rgba(0,0,0,.5)",
+    );
   }
 
   /** โต๊ะ Browser แสดงป้ายชื่อผู้ถือเสมอ แม้ตัวถือจะไปยืนที่โซน Approval (P2 > P3 — spec §7.3) */
   function drawBrowserHolderNameplate(holderMeta) {
-    if (!holderMeta) return null;
-    if (holderMeta.zone === "browser") return null; // อยู่ที่โต๊ะอยู่แล้ว ป้ายตัวละครพอ ไม่ต้องซ้ำ
-    const slot = zones.browser.holderSlot;
-    return drawLabelPlate(slot.x * tilePx, slot.y * tilePx + 30, [
-      {
-        text: `🌐 ${holderMeta.label} (ถือ Browser)`,
-        font: "bold 10px sans-serif",
-        bg: "rgba(139,108,255,.55)",
-        maxWidth: BROWSER_HOLDER_LABEL_MAX_WIDTH,
-      },
-    ]);
+    if (!holderMeta) return;
+    if (holderMeta.zone === "browser") return; // อยู่ที่โต๊ะอยู่แล้ว ป้ายตัวละครพอ ไม่ต้องซ้ำ
+    drawFixedLabel(
+      labels.browserHolder,
+      [{ text: `🌐 ${holderMeta.label} (ถือ Browser)`, font: "bold 10px sans-serif", fg: "rgba(255,255,255,.92)" }],
+      "rgba(139,108,255,.55)",
+    );
   }
 
   // ป้าย/marker ของ Schedule auto-pause — สีนิ่ง ไม่พัลส์ (เอฟเฟกต์ที่ขึ้นกับเวลามีได้เฉพาะโซน Approval, spec §7.4)
   function drawAutoPausedMarkers(markers) {
     const hitboxes = [];
-    const boxes = [];
-    const [bx, by] = zones.bug.rect;
+    if (!markers.length) return hitboxes;
+    const spec = fixedLabels(zones, tilePx, markers.length);
     markers.forEach((m, i) => {
-      const cx = (bx + 0.9 + i * 1.7) * tilePx;
-      const cy = (by + 0.7) * tilePx;
+      const { cx, cy, r } = spec.autoPause.markers[i];
       ctx.beginPath();
-      ctx.arc(cx, cy, 12, 0, Math.PI * 2);
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.fillStyle = "rgba(213,60,60,0.65)";
       ctx.fill();
       ctx.strokeStyle = "rgba(255,255,255,.6)";
@@ -653,72 +618,61 @@ export function createRenderer({ canvas, zones, assets, roomSize }) {
       ctx.fillStyle = "#fff";
       ctx.fillText("⏸", cx, cy + 1);
       ctx.textBaseline = "alphabetic";
-      hitboxes.push({ kind: "schedule", id: m.id, x1: cx - 14, y1: cy - 14, x2: cx + 14, y2: cy + 14 });
-      boxes.push({ x1: cx - 14, y1: cy - 14, x2: cx + 14, y2: cy + 14 });
+      hitboxes.push({ kind: "schedule", id: m.id, x1: cx - r - 2, y1: cy - r - 2, x2: cx + r + 2, y2: cy + r + 2 });
     });
-    if (markers.length) {
-      boxes.push(
-        drawLabelPlate((bx + 0.9) * tilePx, (by + 1.6) * tilePx, [
-          { text: "Schedule auto-pause", font: "9px sans-serif", bg: "rgba(0,0,0,.55)" },
-        ]),
-      );
-    }
-    return { hitboxes, boxes };
+    drawFixedLabel(
+      spec.autoPause.plate,
+      [{ text: "Schedule auto-pause", font: "9px sans-serif", fg: "rgba(255,255,255,.92)" }],
+      "rgba(0,0,0,.6)",
+    );
+    return hitboxes;
   }
 
   /**
-   * ป้ายชื่อตัวละคร — pass สุดท้ายเสมอ (spec §7.2) พร้อมกันป้ายทับกันเอง:
-   * ป้ายที่กรอบชนของที่วางไปแล้ว (ป้ายโซน / ป้ายตัวอื่น / ป้ายผู้ถือ Browser) ถูก **ดันลง** ทีละแถว
-   * จนไม่ชน — เลือกวิธีนี้แทนการบีบข้อความให้แคบลง เพราะโซน grid 3 คอลัมน์ (stopped/bug ห่างกัน ~54px)
-   * และคิว Browser (~58px) แคบกว่าความกว้างขั้นต่ำของ "ชื่อ + นาฬิกา" อยู่แล้ว บีบเท่าไรก็ยังทับ
-   * และการบีบจนนาฬิกาหาย/งบเหลือ 0 คือบั๊กที่ commit ก่อนหน้าเพิ่งแก้ไป
+   * ป้ายชื่อตัวละคร — pass สุดท้ายเสมอ (spec §7.2)
    *
-   * ลำดับพิจารณาต้องนิ่งข้ามเฟรม (y แล้วค่อย id) ไม่งั้นตอนทุกคนยืนนิ่งที่ y เท่ากัน ป้ายจะสลับแถวกันไปมา
+   * กล่องป้ายมี **ขนาดตายตัว** (characterLabelBox) ไม่ยืดตามความยาวชื่อ และที่นั่งถูกวางให้ห่างกันพอ
+   * ตั้งแต่ใน buildZones แล้ว ⇒ ป้ายอยู่ในโซนของตัวเองและไม่ชนกันโดยเรขาคณิต ไม่ต้องมี pass หลบกันอีก
+   * (pass "ดันป้ายที่ชนลงทีละแถว" ของรอบก่อนถูกถอดออกแล้ว — มันแก้ตามเกณฑ์ที่ผิด แล้วดันป้ายออกนอกโซน)
+   *
+   * บรรทัด 1 = ชื่อ (ตัดด้วย … ชื่อเต็มดูจากการ์ดตอนคลิก) · บรรทัด 2 = **นาฬิกาก่อนเสมอ** แล้วค่อยยัด
+   * headline ในงบที่เหลือ — สลับลำดับเมื่อไรชื่อ/headline ยาว ๆ จะกินงบจนนาฬิกาหายทั้งห้อง (บั๊ก 77cf82c)
    */
-  function drawCharacterLabels(items, hostNowMs, occupied) {
+  function drawCharacterLabels(items, hostNowMs) {
     const ordered = [...items].sort((a, b) => a.y - b.y || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     for (const item of ordered) {
+      if (item.meta.overflow) continue; // ล้นที่นั่งของโซน — นับรวมเป็น +n ที่หัวโซนแทน
+      const box = characterLabelBox(item.x, item.y, tilePx);
+      const cx = (box.x1 + box.x2) / 2;
+      const budget = box.x2 - box.x1 - LABEL_PLATE_PAD_X * 2;
       const clock = getClockInfo(item.meta, hostNowMs);
-      const clockGlyph = clock.countdown ? "⏳" : "⏱";
-      const prepared = layoutLabel(
-        [
-          {
-            text: item.meta.label,
-            // นาฬิกาเป็น `suffix` ไม่ใช่ส่วนหนึ่งของ text — ห้ามให้ชื่อเธรดยาว ๆ ตัดมันทิ้ง (spec §5.6)
-            suffix: `  ${clockGlyph}${clock.text}`,
-            font: "600 10px sans-serif",
-            maxWidth: CHARACTER_LABEL_MAX_WIDTH,
-          },
-          item.meta.headline
-            ? {
-                text: item.meta.headline,
-                font: "9px sans-serif",
-                fg: "rgba(255,255,255,.75)",
-                maxWidth: CHARACTER_LABEL_MAX_WIDTH,
-              }
-            : null,
-        ].filter(Boolean),
-      );
-
-      const baseY = item.y + 16;
-      const box = labelBox(item.x, baseY, prepared);
-      const shift = resolveLabelShift(box, occupied, {
-        gap: LABEL_GAP,
-        maxPush: LABEL_MAX_PUSH,
-        maxY: H - 2,
-      });
-      occupied.push({ x1: box.x1, x2: box.x2, y1: box.y1 + shift, y2: box.y2 + shift });
+      const clockText = `${clock.countdown ? "⏳" : "⏱"}${clock.text}`;
 
       ctx.globalAlpha = item.alpha;
-      if (shift >= LABEL_LEADER_MIN_SHIFT) {
-        ctx.strokeStyle = "rgba(255,255,255,.3)";
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(item.x, item.y + 4);
-        ctx.lineTo(item.x, baseY + shift - 12);
-        ctx.stroke();
-      }
-      drawPreparedLabel(item.x, baseY + shift, prepared);
+      drawPlate(box, "rgba(0,0,0,.62)");
+      drawClippedLine(
+        item.meta.label,
+        cx,
+        box.y1 + LABEL_TEXT_BASELINE,
+        budget,
+        "600 10px sans-serif",
+        "rgba(255,255,255,.94)",
+      );
+
+      ctx.font = "10px sans-serif";
+      const rest = budget - ctx.measureText(`${clockText} · `).width;
+      const line2 =
+        item.meta.headline && rest >= MIN_HEADLINE_WIDTH
+          ? `${clockText} · ${clipTextToWidth(ctx, item.meta.headline, rest)}`
+          : clockText;
+      drawClippedLine(
+        line2,
+        cx,
+        box.y1 + LABEL_LINE_H + LABEL_TEXT_BASELINE,
+        budget,
+        "10px sans-serif",
+        clock.overdue ? "rgba(255,190,190,.95)" : "rgba(255,255,255,.82)",
+      );
       ctx.globalAlpha = 1;
     }
   }
@@ -757,21 +711,24 @@ export function createRenderer({ canvas, zones, assets, roomSize }) {
       });
     }
 
-    // marker ของ Schedule วาดก่อนป้ายชื่อ เพื่อให้ป้ายชื่อตัวละครหลบมันได้ (ไม่ใช่ทับมัน)
-    const schedule = drawAutoPausedMarkers(autoPausedSchedules || []);
+    const scheduleHitboxes = drawAutoPausedMarkers(autoPausedSchedules || []);
 
     const holderMeta = browserQueue?.holder
       ? withSelection.find((i) => i.id === browserQueue.holder)?.meta
       : null;
-    const holderBox = drawBrowserHolderNameplate(holderMeta);
+    drawBrowserHolderNameplate(holderMeta);
 
     // ป้ายชื่อ (โซน + ตัวละคร) เป็น pass สุดท้ายเสมอ กันตัวละครแถวแรกบัง (spec §7.2)
-    // `occupied` เริ่มจากป้ายที่ตำแหน่งตายตัว (โซน/ผู้ถือ Browser/auto-pause) แล้วป้ายตัวละครหลบให้
-    const occupied = [...drawZoneLabels(), ...schedule.boxes];
-    if (holderBox) occupied.push(holderBox);
-    drawCharacterLabels(withSelection, hostNowMs, occupied);
+    // ตัวที่ล้นที่นั่งของโซนไม่ได้ป้าย แต่ถูกนับเป็น +n ที่หัวโซน (ต้องนับก่อนวาดหัวโซน)
+    const overflowByZone = {};
+    for (const item of withSelection) {
+      if (!item.meta.overflow) continue;
+      overflowByZone[item.meta.zone] = (overflowByZone[item.meta.zone] || 0) + 1;
+    }
+    drawZoneLabels(overflowByZone);
+    drawCharacterLabels(withSelection, hostNowMs);
 
-    return [...hitboxes, ...schedule.hitboxes];
+    return [...hitboxes, ...scheduleHitboxes];
   }
 
   return { draw, W, H };

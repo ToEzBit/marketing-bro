@@ -11,6 +11,7 @@
 import {
   buildZones,
   warnZoneOverlaps,
+  warnLabelFits,
   doorSlotFor,
   roomSizeFromMap,
   zoneRectsFromMap,
@@ -101,6 +102,9 @@ async function bootstrap() {
 
   zones = buildZones(zoneRectsFromMap(assets.map));
   warnZoneOverlaps(zones); // self-check ตอน dev — เตือนเฉย ๆ ไม่ throw (spec §7.2)
+  // rect จาก map.json ที่เล็กกว่าที่กล่องป้ายขนาดตายตัวต้องการ จะทำให้ป้ายล้นออกนอกโซน — เตือนไว้
+  // (layout.test.js ตรวจชุด rect ที่ ship จริงอยู่แล้ว อันนี้ครอบชุด custom ที่เทสต์มองไม่เห็น)
+  warnLabelFits(zones, tilePx);
 
   room = createRoomState(zones, { tilePx, door });
   renderer = createRenderer({ canvas, zones, assets, roomSize });

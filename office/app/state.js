@@ -53,7 +53,13 @@ function collectCharacters(snapshot) {
   return byId;
 }
 
-/** จัดสรร slotIndex ให้แต่ละ id ในโซน โดยพยายามคงตำแหน่งเดิมถ้ายังอยู่โซนเดิม (กันสลับที่กันเองไม่มีเหตุผล) */
+/**
+ * จัดสรร slotIndex ให้แต่ละ id ในโซน โดยพยายามคงตำแหน่งเดิมถ้ายังอยู่โซนเดิม (กันสลับที่กันเองไม่มีเหตุผล)
+ *
+ * ตัวที่ไม่เหลือที่นั่งได้ index ตั้งแต่ `slotCount` ขึ้นไป = **ล้นโซน** ยืนซ้อนที่นั่งสุดท้ายและ
+ * ไม่ได้ป้ายชื่อ (render.js นับรวมเป็น `+n` ที่หัวโซนแทน) — ก่อนหน้านี้ทุกตัวที่ล้นถูกยัดที่นั่งสุดท้าย
+ * เหมือนกันแล้วป้ายก็ทับกันเป็นตั้ง ซึ่งเป็นต้นทางของบันไดป้ายที่ไหลข้ามโซนไปทั้งจอ
+ */
 function assignSlots(prevAssignment, idsInZone, slotCount) {
   const used = new Set();
   const result = {};
@@ -65,11 +71,16 @@ function assignSlots(prevAssignment, idsInZone, slotCount) {
     }
   }
   let nextFree = 0;
+  let overflow = slotCount;
   for (const id of idsInZone) {
     if (result[id] != null) continue;
     while (used.has(nextFree) && nextFree < slotCount) nextFree++;
-    result[id] = nextFree < slotCount ? nextFree : slotCount - 1;
-    used.add(result[id]);
+    if (nextFree < slotCount) {
+      result[id] = nextFree;
+      used.add(nextFree);
+    } else {
+      result[id] = overflow++;
+    }
   }
   return result;
 }
@@ -118,7 +129,7 @@ export function createRoomState(zones, options = {}) {
     cache.dur = Math.max(MIN_GLIDE_MS, (distTiles / GLIDE_TILES_PER_SEC) * 1000);
   }
 
-  function buildMeta(char, zoneRole) {
+  function buildMeta(char, zoneRole, overflow = false) {
     return {
       id: char.id,
       kind: char.kind,
@@ -142,12 +153,14 @@ export function createRoomState(zones, options = {}) {
       role: zoneRole.role ?? null,
       queuePos: zoneRole.queuePos ?? null,
       browserBadge: !!zoneRole.browserBadge,
+      // true = โซนนี้มีตัวละครมากกว่าที่นั่ง ตัวนี้เลยไม่มีที่นั่งของตัวเอง ⇒ ไม่วาดป้ายชื่อ นับเป็น +n แทน
+      overflow,
     };
   }
 
-  function placeEntity(char, slot, zoneRole, now) {
+  function placeEntity(char, slot, zoneRole, now, overflow = false) {
     const target = worldPos(slot, tilePx);
-    const meta = buildMeta(char, zoneRole);
+    const meta = buildMeta(char, zoneRole, overflow);
     let cache = posCache.get(char.id);
     if (!cache) {
       // เกิด: เดินเข้ามาจากประตูเสมอ (spec §7.4) ไม่ใช่ fade-in อยู่กับที่
@@ -196,14 +209,12 @@ export function createRoomState(zones, options = {}) {
     for (const zoneId of Object.keys(zones)) {
       const list = byZone[zoneId] || [];
       if (zoneId === "browser") {
+        const waiters = zones.browser.waiterSlots;
         for (const { char, zoneRole } of list) {
-          const slot =
-            zoneRole.role === "holder"
-              ? zones.browser.holderSlot
-              : zones.browser.waiterSlots[
-                  Math.min(zoneRole.queuePos - 1, zones.browser.waiterSlots.length - 1)
-                ];
-          placeEntity(char, slot, zoneRole, now);
+          const isHolder = zoneRole.role === "holder";
+          const queueIdx = zoneRole.queuePos - 1;
+          const slot = isHolder ? zones.browser.holderSlot : waiters[Math.min(queueIdx, waiters.length - 1)];
+          placeEntity(char, slot, zoneRole, now, !isHolder && queueIdx >= waiters.length);
         }
       } else {
         const slotCount = zones[zoneId].slots.length;
@@ -212,7 +223,7 @@ export function createRoomState(zones, options = {}) {
         slotMemory[zoneId] = assignment;
         for (const { char, zoneRole } of list) {
           const idx = assignment[char.id] ?? slotCount - 1;
-          placeEntity(char, zones[zoneId].slots[idx], zoneRole, now);
+          placeEntity(char, zones[zoneId].slots[Math.min(idx, slotCount - 1)], zoneRole, now, idx >= slotCount);
         }
       }
     }
