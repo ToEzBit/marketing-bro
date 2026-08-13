@@ -294,6 +294,24 @@ export function slotLabelBox(slot, tilePx = TILE) {
   return characterLabelBox(slot.x * tilePx, slot.y * tilePx, tilePx);
 }
 
+/**
+ * **เลื่อน** (ไม่ย่อ ไม่ยืด) กล่องให้กลับเข้ามาในกรอบ `bounds`
+ *
+ * ใช้กับป้ายของตัวละครที่กำลัง **เดินเข้า/ออกทางประตู** เท่านั้น — ตอนนั้นตัวละครอยู่นอกทุกโซน จึงไม่มี
+ * โซนไหนการันตีให้ และประตูอยู่ติดผนังล่างพอดี (DOOR_SLOT y = rows - 0.6) ป้ายจึงตกใต้ขอบ canvas
+ * ทั้งใบ นาฬิกาหายไปเลยตลอดช่วงเดิน (~1 วินาที)
+ *
+ * **นี่ไม่ใช่กลไกที่ทำให้ containment ผ่าน** — ป้ายของที่นั่งทุกที่อยู่ในโซนตั้งแต่แรกอยู่แล้ว การ clamp
+ * จึงต้องเป็น no-op กับทุกที่นั่ง (layout.test.js ยืนยันข้อนี้ไว้ ไม่งั้นตาข่าย containment จะกลายเป็นของปลอม)
+ */
+export function clampBoxInto(box, bounds) {
+  const w = box.x2 - box.x1;
+  const h = box.y2 - box.y1;
+  const x1 = Math.min(Math.max(box.x1, bounds.x1), Math.max(bounds.x1, bounds.x2 - w));
+  const y1 = Math.min(Math.max(box.y1, bounds.y1), Math.max(bounds.y1, bounds.y2 - h));
+  return { x1, y1, x2: x1 + w, y2: y1 + h };
+}
+
 /** แผ่นป้ายที่จัดกึ่งกลางแนวนอนที่ cx โดยมีขอบบนที่ top — `w` คือ "ความกว้างสูงสุด" ที่ render จะไม่เกิน */
 function plate(cx, top, w, h) {
   return { cx, top, w, h, x1: cx - w / 2, y1: top, x2: cx + w / 2, y2: top + h };

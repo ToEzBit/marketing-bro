@@ -23,6 +23,7 @@ import {
   tileLayersOf,
   animationFrameIndex,
   characterLabelBox,
+  clampBoxInto,
   fixedLabels,
   LABEL_LINE_H,
   LABEL_PLATE_H,
@@ -110,6 +111,8 @@ export function createRenderer({ canvas, zones, assets, roomSize }) {
   const H = rows * tilePx;
   /** เรขาคณิตของป้ายตำแหน่งตายตัว — คำนวณครั้งเดียวจาก layout.js (แหล่งเดียวกับที่ layout.test.js ตรวจ) */
   const labels = fixedLabels(zones, tilePx);
+  /** ขอบเขตที่ป้ายตัวละครห้ามหลุดออกไป (ขอบ canvas หักกรอบดำ 3px ของห้อง) */
+  const ROOM_LABEL_BOUNDS = { x1: 4, y1: 4, x2: W - 4, y2: H - 4 };
 
   function tileRect([x, y, w, h]) {
     return [x * tilePx, y * tilePx, w * tilePx, h * tilePx];
@@ -549,15 +552,13 @@ export function createRenderer({ canvas, zones, assets, roomSize }) {
       { x1: spec.cx - plateW / 2, y1: spec.top, x2: spec.cx + plateW / 2, y2: spec.top + spec.h },
       bg,
     );
+    // ตัดข้อความไปแล้วข้างบน (พร้อมกันที่ให้ suffix) — **ห้ามตัดซ้ำ** ไม่งั้นรอบสองจะกินจากท้าย
+    // ซึ่งคือ suffix ที่เพิ่งอุตส่าห์กันไว้ · `maxWidth` ของ fillText ยังเป็นตาข่ายชั้นสุดท้ายอยู่
+    ctx.textAlign = "center";
     prepared.forEach((line, i) => {
-      drawClippedLine(
-        line.text,
-        spec.cx,
-        spec.top + i * LABEL_LINE_H + LABEL_TEXT_BASELINE,
-        budget,
-        line.font,
-        line.fg,
-      );
+      ctx.font = line.font;
+      ctx.fillStyle = line.fg;
+      ctx.fillText(line.text, spec.cx, spec.top + i * LABEL_LINE_H + LABEL_TEXT_BASELINE, budget);
     });
   }
 
@@ -657,7 +658,9 @@ export function createRenderer({ canvas, zones, assets, roomSize }) {
     const ordered = [...items].sort((a, b) => a.y - b.y || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     for (const item of ordered) {
       if (item.meta.overflow) continue; // ล้นที่นั่งของโซน — นับรวมเป็น +n ที่หัวโซนแทน
-      const box = characterLabelBox(item.x, item.y, tilePx);
+      // clamp ใช้ได้จริงเฉพาะช่วงเดินเข้า/ออกทางประตู (ประตูอยู่ติดผนังล่าง ป้ายจะตกใต้ canvas ทั้งใบ)
+      // — กับที่นั่งทุกที่มันเป็น no-op เพราะป้ายอยู่ในโซนตั้งแต่แรก (ยืนยันไว้ใน layout.test.js)
+      const box = clampBoxInto(characterLabelBox(item.x, item.y, tilePx), ROOM_LABEL_BOUNDS);
       const cx = (box.x1 + box.x2) / 2;
       const budget = box.x2 - box.x1 - LABEL_PLATE_PAD_X * 2;
       const clock = getClockInfo(item.meta, hostNowMs);

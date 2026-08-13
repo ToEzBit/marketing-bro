@@ -21,6 +21,7 @@ import {
   boxInside,
   slotLabelBox,
   characterLabelBox,
+  clampBoxInto,
   zoneLabelArea,
   zoneRectPx,
   fixedLabels,
@@ -331,6 +332,29 @@ check("ที่นั่งที่ถูกดันออกนอกโซ�
   const problems = labelFitReport(broken, TILE);
   assert.ok(problems.some((p) => p.zone === "stopped" && p.kind === "contain"), "3 คอลัมน์ใน 6 tile ต้องล้น");
   assert.ok(problems.some((p) => p.zone === "stopped" && p.kind === "overlap"), "และต้องทับกันเองด้วย");
+});
+
+console.log("\nป้ายของตัวละครที่กำลังเดินเข้า/ออกทางประตู (อยู่นอกทุกโซนชั่วคราว)");
+
+check("ป้ายที่ประตูตกใต้ขอบห้องทั้งใบ ถ้าไม่ดึงกลับ — นาฬิกาจะหายตลอดช่วงเดินเข้า/ออก", () => {
+  const H = ROOM.rows * TILE;
+  const raw = characterLabelBox(DOOR_SLOT.x * TILE, DOOR_SLOT.y * TILE, TILE);
+  assert.ok(raw.y2 > H, `ป้ายที่ประตูต้องตกใต้ขอบห้องจริง (y2=${raw.y2} vs H=${H}) ไม่งั้นเทสต์นี้ไม่ได้ทดสอบอะไร`);
+  const bounds = { x1: 4, y1: 4, x2: ROOM.cols * TILE - 4, y2: H - 4 };
+  const fixed = clampBoxInto(raw, bounds);
+  assert.ok(boxInside(fixed, bounds), "ดึงกลับแล้วต้องอยู่ในห้อง");
+  assert.equal(fixed.x2 - fixed.x1, raw.x2 - raw.x1, "เลื่อนเท่านั้น ห้ามย่อ");
+  assert.equal(fixed.y2 - fixed.y1, raw.y2 - raw.y1, "เลื่อนเท่านั้น ห้ามย่อ");
+});
+
+check("★ clamp ต้องเป็น no-op กับที่นั่งทุกที่ในทุกโซน — ไม่งั้นตาข่าย containment กลายเป็นของปลอม", () => {
+  const bounds = { x1: 4, y1: 4, x2: ROOM.cols * TILE - 4, y2: ROOM.rows * TILE - 4 };
+  for (const id of ZONE_IDS) {
+    zones[id].slots.forEach((slot, i) => {
+      const raw = slotLabelBox(slot, TILE);
+      assert.deepEqual(clampBoxInto(raw, bounds), raw, `โซน ${id} ที่นั่ง ${i}: ป้ายต้องอยู่ในห้องอยู่แล้ว`);
+    });
+  }
 });
 
 console.log("\nป้ายตำแหน่งตายตัว (หัวโซน / FIFO / ผู้ถือ Browser / Schedule auto-pause)");
