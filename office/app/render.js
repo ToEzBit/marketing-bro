@@ -823,9 +823,12 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
     const overflowHitboxes = drawZoneLabels(overflowByZone);
     drawCharacterLabels(withSelection, hostNowMs);
 
-    // เรียงจาก "สำคัญน้อย → มาก": findHit ไล่จากท้ายมาหน้า ⇒ ตัวละคร/ป้าย Schedule ชนะชิป +n
-    // เมื่อกรอบมันเหลื่อมกัน (หัวของตัวละครแถวบนสุดอยู่ใกล้แถบหัวโซนในบางโซน)
-    return [...overflowHitboxes, ...hitboxes, ...scheduleHitboxes];
+    // findHit ไล่จากท้ายมาหน้า ⇒ ของที่อยู่ท้ายสุดชนะเมื่อกรอบเหลื่อมกัน · **ชิป `+n` ต้องอยู่ท้ายสุด**
+    // เพราะกรอบคลิกของตัวละครสูงเลยหัวขึ้นไป ~36px (เป็นที่ว่างในเฟรม 64px ไม่ใช่ตัวงานศิลป์) แล้วมันไป
+    // คร่อมแถบหัวโซนพอดี — วัดในเบราว์เซอร์จริงที่โซน desks: ตอนตัวละครชนะ ชิปเหลือช่องคลิกแค่ ~3px
+    // ซึ่งเท่ากับตัวที่ซ่อนอยู่กลับไปเปิดไม่ได้อีก · ที่ยอมให้ชิปชนะเพราะแถบชิปสูงแค่ ~19px ที่ขอบบนสุด
+    // ของโซน ส่วนงานศิลป์ของตัวละครแถวบนสุดเริ่มต่ำกว่านั้นลงมามาก ⇒ ชิปกินได้แค่ "อากาศเหนือหัว"
+    return [...hitboxes, ...scheduleHitboxes, ...overflowHitboxes];
   }
 
   return { draw, W, H };

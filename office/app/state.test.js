@@ -522,7 +522,16 @@ check("★ กรอบคลิกที่ renderer คืนมา ครอ�
   assert.deepEqual(chars.filter((id) => overflowIds.has(id)), []);
 });
 
-check("★ ทุกโซนที่ล้นมีชิป +n ให้คลิก และคลิกแล้วได้ 'โซน' ที่มีรายชื่อตัวที่ซ่อนอยู่จริง", () => {
+/** สำเนากติกาเลือกกล่องของ main.js: ไล่จากท้ายมาหน้า กล่องท้ายสุดที่โดนชนะ */
+function findHit(hitboxes, x, y) {
+  for (let i = hitboxes.length - 1; i >= 0; i--) {
+    const b = hitboxes[i];
+    if (x >= b.x1 && x <= b.x2 && y >= b.y1 && y <= b.y2) return b;
+  }
+  return null;
+}
+
+check("★ ทุกโซนที่ล้นมีชิป +n และ 'คลิกกลางชิปแล้วต้องได้ชิปนั้นจริง' (ไม่ถูกกรอบตัวละครบังจนกดไม่ได้)", () => {
   const { drawList, q } = crowdedRoom();
   const { hitboxes } = renderOnce(placeholderAssets(), { drawList, browserQueue: q });
   const groups = overflowGroups(drawList);
@@ -530,11 +539,29 @@ check("★ ทุกโซนที่ล้นมีชิป +n ให้ค�
   assert.deepEqual(chips.map((c) => c.id).sort(), Object.keys(groups).sort());
   for (const chip of chips) {
     assert.ok(chip.x2 > chip.x1 && chip.y2 > chip.y1, `ชิปโซน ${chip.id} ต้องมีพื้นที่ให้คลิกจริง`);
+    // จุดกึ่งกลางชิปต้อง resolve เป็นชิปตัวเอง — เทสต์เดิมที่เช็คแค่ "มีกล่อง" ปล่อยเคสที่กรอบตัวละคร
+    // (ซึ่งสูงเลยหัวขึ้นไปจนถึงแถบหัวโซน) กินชิปไปทั้งใบ แล้วตัวที่ซ่อนอยู่ก็เปิดไม่ได้อีกเลย
+    const hit = findHit(hitboxes, (chip.x1 + chip.x2) / 2, (chip.y1 + chip.y2) / 2);
+    assert.deepEqual(
+      { kind: hit?.kind, id: hit?.id },
+      { kind: "overflow", id: chip.id },
+      `คลิกกลางชิปของโซน ${chip.id} แล้วไปโดน ${hit?.kind}/${hit?.id} แทน`,
+    );
     assert.ok(groups[chip.id].length > 0);
   }
-  // ชิปถูกใส่ไว้ก่อนกรอบตัวละคร ⇒ findHit (ไล่จากท้าย) ให้ตัวละครชนะเมื่อกรอบเหลื่อมกัน
-  const firstChar = hitboxes.findIndex((h) => h.kind === "character");
-  assert.ok(hitboxes.findIndex((h) => h.kind === "overflow") < firstChar);
+});
+
+check("★ คลิกที่ตัวละครที่มีที่นั่งยังได้ตัวนั้นเสมอ — ชิปที่ชนะกรอบกินได้แค่อากาศเหนือหัว", () => {
+  const { drawList, q } = crowdedRoom();
+  const { hitboxes } = renderOnce(placeholderAssets(), { drawList, browserQueue: q });
+  for (const item of drawList.filter((d) => !d.meta.overflow)) {
+    const hit = findHit(hitboxes, item.x, item.y - 20); // จุดเท้าและช่วงลำตัว (งานศิลป์จริง)
+    assert.deepEqual(
+      { kind: hit?.kind, id: hit?.id },
+      { kind: "character", id: item.id },
+      `คลิกที่ตัว ${item.id} แล้วไปโดน ${hit?.kind}/${hit?.id}`,
+    );
+  }
 });
 
 check("รายชื่อในกลุ่ม +n พก 'ความหมายของโซน' มาครบ — คิว Browser ที่ซ่อนอยู่ยังบอกลำดับคิว/เส้นตายได้", () => {
