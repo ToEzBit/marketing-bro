@@ -35,10 +35,12 @@ import {
   CHAR_LABEL_TOP_OFFSET,
   CHAR_SPRITE_TILES,
   CHAR_HEAD_TOP_TILES,
+  CHAR_BODY_HALF_W_TILES,
   CHAIR_SEAT_Y,
   DESK_CHAIR_ROW,
   DESK_ROW_PITCH,
   labelAboveFor,
+  slotHeadTop,
   DEFAULT_ZONE_RECTS,
   ZONE_IDS,
   DOOR_SLOT,
@@ -413,21 +415,47 @@ check("characterLabelBox(above) วางป้ายไว้เหนือห
   assert.ok(above.y2 < 300 - CHAR_SPRITE_TILES * 32 + 1, "ขอบล่างต้องอยู่เหนือหัว ไม่ใช่กลางตัว");
 });
 
-check("★ แถวเก้าอี้ล่างสุดของ desks เท่านั้นที่พลิกป้ายขึ้นบน — ที่เหลือทั้งห้องยังอยู่ใต้เท้าเหมือนเดิม", () => {
+check("★ พลิกเฉพาะที่นั่งที่จำเป็นจริง — ที่เหลือทั้งห้องยังอยู่ใต้เท้าเหมือนเดิม", () => {
   const flipped = [];
   for (const id of ZONE_IDS) {
     zones[id].slots.forEach((s, i) => {
       if (s.labelAbove) flipped.push(`${id}#${i}`);
     });
   }
+  // มีที่เดียวในห้องที่ป้ายใต้เท้าลงไม่ได้จริง ๆ คือแถวเก้าอี้ล่างสุดของ desks (ห่างก้นโซน 0.2 tile)
   assert.deepEqual(flipped, ["desks#4", "desks#5"]);
-  // และต้องพลิกเพราะ "ไม่มีทางเลือก" จริง ๆ ไม่ใช่เพราะความชอบ: ใต้เท้าไม่ลงที่ tilePx ไหนเลย
-  for (const i of [4, 5]) {
+  // และต้องพลิกเพราะ "ไม่มีทางเลือก" จริง ๆ ไม่ใช่เพราะความชอบ — ที่ tilePx ไหนก็ยังต้องพลิก
+  for (const [id, idx] of [["desks", 4], ["desks", 5]]) {
     for (const tilePx of [32, 48, 64, 128]) {
       assert.ok(
-        labelAboveFor(zones.desks, zones.desks.slots[i].y, tilePx),
-        `ที่นั่ง ${i}: ป้ายใต้เท้าลงได้ที่ tilePx=${tilePx} ⇒ ไม่ควรพลิก`,
+        labelAboveFor(zones[id], zones[id].slots[idx], tilePx),
+        `${id} ที่นั่ง ${idx}: ป้ายใต้เท้าลงได้ที่ tilePx=${tilePx} ⇒ ไม่ควรพลิก`,
       );
+    }
+  }
+});
+
+check("★ ไม่มีป้ายใบไหนในห้องไปคลุม 'หัว' ของตัวละครตัวอื่น (กติกาที่ตัดสินผังของ 3 โซน — #20)", () => {
+  // นี่คือเกณฑ์ที่ทำให้ต้องพลิกป้าย และเป็นเกณฑ์ที่บอกว่าโซน Browser ให้ผู้ถือนั่งเก้าอี้ไม่ได้
+  // ตรวจทุก tilePx ที่ chooseTilePx เลือกจริง เพราะกล่องป้ายสูงเป็น px ตายตัวแต่ตัวละครโตตาม tile
+  const chosen = new Set([TILE]);
+  for (let w = 600; w <= 4000; w += 37) chosen.add(chooseTilePx({ availW: w, availH: 2200 }));
+  for (const tilePx of chosen) {
+    for (const id of ZONE_IDS) {
+      const slots = zones[id].slots;
+      slots.forEach((slot, i) => {
+        const box = slotLabelBox(slot, tilePx);
+        slots.forEach((other, j) => {
+          if (i === j) return;
+          const half = CHAR_BODY_HALF_W_TILES * tilePx;
+          const covers =
+            box.y2 > slotHeadTop(other, tilePx) &&
+            box.y1 < other.y * tilePx &&
+            box.x1 < other.x * tilePx + half &&
+            box.x2 > other.x * tilePx - half;
+          assert.equal(covers, false, `tilePx=${tilePx} โซน ${id}: ป้ายของที่นั่ง ${i} คลุมหัวที่นั่ง ${j}`);
+        });
+      });
     }
   }
 });
