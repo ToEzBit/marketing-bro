@@ -533,7 +533,13 @@ export function createRenderer({ canvas, zones, assets, roomSize }) {
     let widest = 0;
     const prepared = lines.map((line) => {
       ctx.font = line.font;
-      const text = clipTextToWidth(ctx, line.text, budget);
+      // `suffix` คือส่วนที่ต้องรอดจากการตัดเสมอ (เช่น "(ถือ Browser)" ที่เป็นตัวบอกความหมายของป้าย) —
+      // กันงบเหลือ 0 ด้วย MIN_HEADLINE_WIDTH เพราะ clipTextToWidth มองค่า falsy ว่า "ไม่จำกัด"
+      const suffix = line.suffix || "";
+      const head = suffix
+        ? Math.max(MIN_HEADLINE_WIDTH, budget - ctx.measureText(suffix).width)
+        : budget;
+      const text = clipTextToWidth(ctx, line.text, head) + suffix;
       const w = Math.min(budget, ctx.measureText(text).width);
       if (w > widest) widest = w;
       return { ...line, text };
@@ -564,12 +570,14 @@ export function createRenderer({ canvas, zones, assets, roomSize }) {
       const z = zones[id];
       const isApproval = id === "approval";
       const extra = overflowByZone[id] || 0;
-      const head = `${z.icon} ${z.label}${extra > 0 ? `  +${extra}` : ""}`;
       drawFixedLabel(
         labels.zoneHeader[id],
         [
           {
-            text: head,
+            text: `${z.icon} ${z.label}`,
+            // `+n` เป็น suffix ไม่ใช่ส่วนหนึ่งของ text — ชื่อโซนยาว ๆ (หรือฟอนต์ที่กว้างกว่าปกติ)
+            // ต้องไม่ตัดตัวเลขที่บอกว่ายังมีอีกกี่ตัวที่ไม่ได้แสดงทิ้ง
+            suffix: extra > 0 ? `  +${extra}` : "",
             font: isApproval ? "bold 15px sans-serif" : "600 12px sans-serif",
             fg: isApproval ? "#ffe6a8" : "rgba(255,255,255,.92)",
           },
@@ -593,7 +601,14 @@ export function createRenderer({ canvas, zones, assets, roomSize }) {
     if (holderMeta.zone === "browser") return; // อยู่ที่โต๊ะอยู่แล้ว ป้ายตัวละครพอ ไม่ต้องซ้ำ
     drawFixedLabel(
       labels.browserHolder,
-      [{ text: `🌐 ${holderMeta.label} (ถือ Browser)`, font: "bold 10px sans-serif", fg: "rgba(255,255,255,.92)" }],
+      [
+        {
+          text: `🌐 ${holderMeta.label}`,
+          suffix: " (ถือ Browser)", // ต้องรอดเสมอ ไม่งั้นป้ายกลายเป็นชื่อลอย ๆ ที่ไม่บอกว่าคือใคร
+          font: "bold 10px sans-serif",
+          fg: "rgba(255,255,255,.92)",
+        },
+      ],
       "rgba(139,108,255,.55)",
     );
   }
