@@ -52,10 +52,13 @@ export const DEFAULT_ZONE_RECTS = {
 
 /**
  * คำนวณที่นั่งแบบ grid ภายใน rect โซน — ห้าม hard-code พิกัดที่นั่งเด็ดขาด (spec §7.2)
+ *
+ * `count` ใช้เมื่อจำนวนที่นั่งไม่เต็ม cols×rows (เช่น 3 ที่นั่งในกริด 2×2 ของโซน stopped/bug):
+ * แถวสุดท้ายที่ไม่เต็มจะถูก **จัดกึ่งกลางโซน** ไม่ใช่ชิดซ้าย — แถวที่มีที่นั่งเดียวจึงได้พิกัดกลาง rect พอดี
  * @param {[number,number,number,number]} rect
  * @param {number} cols
  * @param {number} rows
- * @param {{padX?:number, padTop?:number, padBottom?:number, dir?:string}} [opts]
+ * @param {{padX?:number, padTop?:number, padBottom?:number, dir?:string, count?:number}} [opts]
  * @returns {{x:number,y:number,dir:string}[]}
  */
 export function gridSlots(rect, cols, rows, opts = {}) {
@@ -65,10 +68,13 @@ export function gridSlots(rect, cols, rows, opts = {}) {
   const padBottom = opts.padBottom ?? 0.8;
   const usableW = rw - padX * 2;
   const usableH = rh - padTop - padBottom;
+  const limit = opts.count ?? cols * rows;
   const slots = [];
   for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const x = rx + padX + (cols === 1 ? usableW / 2 : (usableW * c) / (cols - 1));
+    const inRow = Math.min(cols, limit - slots.length);
+    if (inRow <= 0) break;
+    for (let c = 0; c < inRow; c++) {
+      const x = rx + padX + (inRow === 1 ? usableW / 2 : (usableW * c) / (inRow - 1));
       const y = ry + padTop + (rows === 1 ? usableH / 2 : (usableH * r) / (rows - 1));
       slots.push({ x, y, dir: opts.dir || "down" });
     }
@@ -112,10 +118,20 @@ export function buildZones(rectOverrides = {}) {
     zones[id] = { id, rect, ...ZONE_LABELS[id] };
   }
 
-  zones.lounge.slots = gridSlots(zones.lounge.rect, 2, 2, { dir: "down" });
-  zones.stopped.slots = gridSlots(zones.stopped.rect, 3, 1, { dir: "down", padTop: 2.4 });
-  zones.desks.slots = gridSlots(zones.desks.rect, 2, 3, { dir: "down", padTop: 2.2 });
-  zones.bug.slots = gridSlots(zones.bug.rect, 3, 1, { dir: "down", padTop: 2.4 });
+  // ---- ระยะห่างของที่นั่งถูกเลือกจาก "กล่องป้ายขนาดตายตัว" ไม่ใช่จากความสวยอย่างเดียว ----
+  // กติกา: กล่องป้ายของทุกที่นั่งต้องอยู่ในกรอบโซนของตัวเอง (ดู labelFitReport) ⇒ ระยะขั้นต่ำคือ
+  //   แนวนอน  ที่นั่งต้องห่างขอบโซนอย่างน้อยครึ่งความกว้างป้าย (CHAR_LABEL_W_TILES / 2 = 1.375 tile)
+  //   แนวตั้ง  แถวล่างสุดต้องเหลือที่ใต้เท้าอย่างน้อย CHAR_LABEL_TOP_OFFSET + CHAR_LABEL_H (33px ≈ 1.03 tile)
+  //            และแถวบนสุดต้องต่ำกว่าแถบหัวโซน (zoneHeaderHeight)
+  // นี่คือเหตุผลที่ padX = 1.5 ทุกโซนกริด และ padBottom ≥ 1.2 — ห้ามลดลงโดยไม่รัน layout.test.js
+  const GRID = { padX: 1.5, padBottom: 1.2, dir: "down" };
+  zones.lounge.slots = gridSlots(zones.lounge.rect, 2, 2, { ...GRID, padTop: 1.9 });
+  // stopped/bug: 3 ที่นั่งเท่าเดิม แต่เป็นทรงพีระมิด 2+1 แทน 3 ที่เรียงแถวเดียว — สามคอลัมน์ใน 6 tile
+  // ทำให้ระยะห่างเหลือ 1.7 tile ซึ่งแคบกว่าความกว้างป้าย ป้ายจึงชนกันแน่นอนไม่ว่าจะบีบข้อความแค่ไหน
+  zones.stopped.slots = gridSlots(zones.stopped.rect, 2, 2, { ...GRID, padTop: 2.4, count: 3 });
+  zones.bug.slots = gridSlots(zones.bug.rect, 2, 2, { ...GRID, padTop: 2.4, count: 3 });
+  // desks: แถวอยู่ใต้แถวโต๊ะจริงของ map.json (โต๊ะ row 2/7/12, เก้าอี้ row 3/8/13) — 3.2 / 8.0 / 12.8
+  zones.desks.slots = gridSlots(zones.desks.rect, 2, 3, { ...GRID, padTop: 2.2 });
 
   {
     const [ax, ay, aw, ah] = zones.approval.rect;
@@ -127,11 +143,12 @@ export function buildZones(rectOverrides = {}) {
   {
     const [bx, by] = zones.browser.rect;
     zones.browser.holderSlot = { x: bx + 2.6, y: by + 2, dir: "right" };
+    // คิว 2×2 กางออกจนกล่องป้ายไม่ชนกันและไม่ล้นโซน (แถวล่างสุดที่ by+4.85 คือขอบสุดท้ายที่ยังพอดี)
     zones.browser.waiterSlots = [
-      { x: bx + 1.6, y: by + 4.0, dir: "up" },
-      { x: bx + 3.4, y: by + 4.0, dir: "up" },
-      { x: bx + 1.6, y: by + 5.6, dir: "up" },
-      { x: bx + 3.4, y: by + 5.6, dir: "up" },
+      { x: bx + 1.5, y: by + 3.6, dir: "up" },
+      { x: bx + 4.5, y: by + 3.6, dir: "up" },
+      { x: bx + 1.5, y: by + 4.85, dir: "up" },
+      { x: bx + 4.5, y: by + 4.85, dir: "up" },
     ];
     // browser zone ไม่มี "slots" ทั่วไป (assignSlots ใช้ holderSlot/waiterSlots แทน)
     zones.browser.slots = [zones.browser.holderSlot, ...zones.browser.waiterSlots];
@@ -147,6 +164,60 @@ export function buildZones(rectOverrides = {}) {
  */
 export function worldPos(slot, tilePx = TILE) {
   return { x: slot.x * tilePx, y: slot.y * tilePx };
+}
+
+// ---------------------------------------------------------------------------
+// เลือก px ต่อ tile จากพื้นที่ที่มีจริงบนจอ — pure ล้วน (main.js เป็นคนวัดกล่องแล้วส่งตัวเลขเข้ามา)
+//
+// หลักการ: ห้องขยายด้วยการ **วาดใหญ่ขึ้น** ไม่ใช่ยืดภาพ — CSS ยืด canvas 1024px ให้เต็มจอเมื่อไร
+// ตัวหนังสือไทยเบลอทันที (สระบน/ล่างเละก่อนใคร) เพิ่ม tilePx แล้ววาดใหม่ที่ความละเอียดจริงเท่านั้น
+// ---------------------------------------------------------------------------
+
+/** px ต่อ tile ต่ำสุดที่ยอมให้ห้องหดลงไป
+ *
+ *  กล่องป้าย (CHAR_LABEL_H / CHAR_LABEL_TOP_OFFSET / ZONE_LABEL_INSET / zoneHeaderHeight) มีหน่วยเป็น
+ *  px ตายตัว **ไม่หดตาม tile** ⇒ ยิ่ง tilePx เล็ก ป้ายยิ่งกินสัดส่วนโซนมากขึ้นจนล้นในที่สุด
+ *  (แถวล่างของคิว Browser คือจุดที่ตึงที่สุด: 5.85t + 4 + 29 ≤ 7t − 2 ⇒ t ≥ 30.4)
+ *  เทสต์ containment จึงการันตีไว้ที่ ≥32 เท่านั้น — จอที่แคบกว่านี้ให้ **เลื่อนดู** แทนการย่อจนป้ายพัง */
+export const MIN_TILE_PX = TILE;
+
+/** สัดส่วนขั้นต่ำที่ tilePx แบบ "ทวีคูณของ tile ต้นฉบับ" ต้องทำได้ ถึงจะยอมเสียพื้นที่เพื่อความคม
+ *  วัดเป็น **ความยาวด้าน** (tilePx ต่อ tilePx) ไม่ใช่พื้นที่ — ดูเหตุผลใน chooseTilePx() */
+export const CRISP_TILE_RATIO = 0.88;
+
+/**
+ * px ต่อ tile ที่ควรใช้กับพื้นที่ว่างขนาด availW × availH (px ของ CSS หลังหักหัวข้อ/แผงข้าง/ขอบแล้ว)
+ *
+ * เกณฑ์ (ตามที่เจ้าของโปรเจกต์ขอ):
+ *  1. ค่าที่ใหญ่ที่สุดที่ห้องยังใส่ได้ทั้งใบคือ `fit = min(availW/cols, availH/rows)`
+ *  2. **ทวีคูณของขนาด tile ต้นฉบับ** (32 สำหรับชุด asset ที่ ship จริง) ทำให้พิกเซลอาร์ตคมสนิท เพราะ
+ *     ทุกพิกเซลต้นฉบับถูกขยายเป็นจำนวนเต็มเท่ากันหมด — ค่าที่ไม่ใช่ทวีคูณ (เช่น 46) พิกเซลจะขนาด
+ *     ไม่เท่ากันเล็กน้อย เห็นได้แต่ยอมรับได้
+ *  3. จึงใช้ทวีคูณนั้น **ถ้ามันยังกินพื้นที่ได้ ≥ 88% ของที่มี** ไม่งั้นยอมพิกเซลไม่เท่ากันแล้วใช้
+ *     integer ที่ใหญ่สุดที่ยังใส่ได้ (การเหลือขอบดำครึ่งจอเพื่อความคมไม่คุ้ม)
+ *  4. ไม่ต่ำกว่า MIN_TILE_PX เด็ดขาด — จอเล็กเกินไปให้ห้องล้นแล้วเลื่อนดูแทน (ดูเหตุผลที่ MIN_TILE_PX)
+ *
+ * 88% วัดเป็น **ความยาวด้าน** ไม่ใช่พื้นที่โดยตั้งใจ: ถ้าวัดเป็นพื้นที่ ทวีคูณต้องได้ ≥93.8% ของด้าน
+ * ซึ่งแทบไม่มีวันเกิดกับจอจริง (สาขานี้จะกลายเป็นโค้ดตาย) และจะพลาดเคสสำคัญที่สุดคือจอ 2560×1440
+ * ที่ได้ 64px = ขยาย 2 เท่าพอดี
+ *
+ * @param {{availW:number, availH:number, cols?:number, rows?:number, baseTilePx?:number}} args
+ *   `baseTilePx` = ขนาด tile ต้นฉบับบนจอจาก manifest (tileSize × scale) — ห้าม assume 32 (spec §8.2)
+ * @returns {number} จำนวนเต็มเสมอ (ครึ่งพิกเซลทำให้รอยต่อ tile เป็นเส้นบาง ๆ)
+ */
+export function chooseTilePx({ availW, availH, cols = ROOM.cols, rows = ROOM.rows, baseTilePx = TILE }) {
+  const base = Math.floor(Number(baseTilePx)) > 0 ? Math.floor(Number(baseTilePx)) : TILE;
+  const c = Number(cols) > 0 ? Number(cols) : ROOM.cols;
+  const r = Number(rows) > 0 ? Number(rows) : ROOM.rows;
+  // ห้องเล็กกว่าขนาดต้นฉบับ = ย่อภาพพิกเซลลง ซึ่งพังยิ่งกว่าห้องล้นจอ ⇒ พื้นล่างคือ max(32, ต้นฉบับ)
+  const floorPx = Math.max(MIN_TILE_PX, base);
+  const fit = Math.min(Number(availW) / c, Number(availH) / r);
+  if (!Number.isFinite(fit) || fit <= 0) return floorPx;
+
+  const largest = Math.floor(fit); // ค่า integer ที่ใหญ่สุดที่ยังใส่ได้ทั้งห้อง
+  const crisp = Math.floor(fit / base) * base; // ทวีคูณของ tile ต้นฉบับที่ใหญ่สุดที่ยังใส่ได้
+  const useCrisp = crisp >= floorPx && crisp >= fit * CRISP_TILE_RATIO;
+  return Math.max(floorPx, useCrisp ? crisp : largest);
 }
 
 // ---------------------------------------------------------------------------
@@ -197,7 +268,14 @@ export function tileLayersOf(map) {
 }
 
 // ---------------------------------------------------------------------------
-// การจัดวางป้ายไม่ให้ทับกัน (spec §7.2) — pure ล้วน render.js เป็นคนวัดความกว้างจริงแล้วส่งกรอบมา
+// เรขาคณิตของป้าย (spec §7.2) — pure ล้วน หน่วยเป็น px บนเวิลด์ (ก่อนคูณ dpr)
+//
+// เกณฑ์เดียวที่ตัดสินว่าป้ายวางถูกคือ **containment**: กล่องป้ายทุกใบต้องอยู่ในกรอบโซนของตัวเอง
+// เพราะโซนไม่ซ้อนกัน (findOverlappingZones) containment จึงพิสูจน์ "ป้ายข้ามโซนไม่ได้" ให้ฟรี
+// และเมื่อบวกกับที่นั่งที่ห่างกันพอ (buildZones) ก็ได้ "ป้ายไม่ทับกัน" เป็นผลพลอยได้อีกที
+//
+// ประวัติ: รอบก่อนใช้เกณฑ์ "ป้ายห้ามทับกัน" แล้วแก้ด้วยการดันป้ายที่ชนลงทีละแถว ผลคือได้ 0 คู่ที่ทับกัน
+// จริง แต่ป้ายเดินออกนอกโซนตัวเองเป็นบันไดทแยงกินครึ่งจอ — เกณฑ์นั้นถูกถอดออกทั้งกลไกและเทสต์แล้ว
 // ---------------------------------------------------------------------------
 
 /** กรอบสี่เหลี่ยมสองอันชนกันไหม เผื่อช่องว่างขั้นต่ำ `gap` px รอบด้าน */
@@ -205,34 +283,223 @@ export function boxesOverlap(a, b, gap = 0) {
   return a.x1 - gap < b.x2 && a.x2 + gap > b.x1 && a.y1 - gap < b.y2 && a.y2 + gap > b.y1;
 }
 
+/** `inner` อยู่ในกรอบ `outer` ครบทุกด้านไหม (ขอบชนขอบพอดีถือว่าอยู่ข้างใน) */
+export function boxInside(inner, outer) {
+  return inner.x1 >= outer.x1 && inner.x2 <= outer.x2 && inner.y1 >= outer.y1 && inner.y2 <= outer.y2;
+}
+
+/** ระยะบรรทัด + ความสูงแผ่นรองของป้ายหนึ่งบรรทัด (px) — ผูกกับขนาดฟอนต์ จึงเป็น px ตายตัวไม่ใช่ tile */
+export const LABEL_LINE_H = 14;
+export const LABEL_PLATE_H = 15;
+export const LABEL_PLATE_PAD_X = 5;
+/** ป้ายชื่อตัวละครเป็นสองบรรทัดเสมอ (บรรทัด 1 = ชื่อ, บรรทัด 2 = นาฬิกา + headline) ⇒ สูงคงที่ */
+export const CHAR_LABEL_H = LABEL_LINE_H + LABEL_PLATE_H;
 /**
- * หาว่าต้องเลื่อนป้ายลงเท่าไรถึงจะไม่ทับกรอบที่จองไว้แล้ว — **ดันลงอย่างเดียว** ไม่ขยับซ้ายขวา
- * (ป้ายต้องอยู่ตรงกับหัวตัวละครในแนวนอนเสมอ ไม่งั้นดูไม่ออกว่าเป็นของใคร)
- *
- * แต่ละรอบกระโดดไปใต้ "ขอบล่างที่ต่ำที่สุด" ของกรอบที่ชนอยู่ ไม่ใช่ขยับทีละก้าวคงที่ — ก้าวคงที่
- * ที่สั้นกว่าความสูงป้ายสองบรรทัดจะเลื่อนแล้วยังทับอยู่ แล้วโควตาการเลื่อนหมดก่อนที่จะพ้นกัน
- * @param {{x1:number,x2:number,y1:number,y2:number}} box กรอบของป้ายที่ตำแหน่งตั้งต้น
- * @param {{x1:number,x2:number,y1:number,y2:number}[]} occupied กรอบที่ถูกจองไปแล้ว
- * @param {{gap?:number, maxPush?:number, maxY?:number}} [opts]
- * @returns {number} ระยะเลื่อนลง (px) — 0 คือวางที่ตำแหน่งตั้งต้นได้เลย
+ * ความกว้างกล่องป้ายชื่อตัวละคร — **ตายตัว** เป็นสัดส่วนของ tile ไม่ยืดตามความยาวชื่อ
+ * (ชื่อยาวถูกตัดด้วย … ชื่อเต็มดูได้จากการ์ดข้อมูลตอนคลิก — spec §7.5)
+ * 2.75 tile = 88px ที่ชุด asset จริง ซึ่งพอดี 2 คอลัมน์ในโซนกว้าง 6 tile โดยยังเหลือช่องว่างระหว่างกัน
  */
-export function resolveLabelShift(box, occupied, opts = {}) {
-  const gap = opts.gap ?? 2;
-  const maxPush = opts.maxPush ?? 10;
-  let shift = 0;
-  for (let i = 0; i < maxPush; i++) {
-    const moved = { x1: box.x1, x2: box.x2, y1: box.y1 + shift, y2: box.y2 + shift };
-    let lowest = null;
-    for (const other of occupied) {
-      if (!boxesOverlap(moved, other, gap)) continue;
-      lowest = lowest === null ? other.y2 : Math.max(lowest, other.y2);
-    }
-    if (lowest === null) break;
-    shift = lowest + gap + 1 - box.y1;
+export const CHAR_LABEL_W_TILES = 2.75;
+/** ขอบบนของกล่องป้าย = จุดเท้าตัวละคร + ระยะนี้ */
+export const CHAR_LABEL_TOP_OFFSET = 4;
+/** ระยะร่นเข้ามาจากขอบโซน ที่ป้ายห้ามล้ำออกไป */
+export const ZONE_LABEL_INSET = 2;
+/** baseline ของป้ายหัวโซน วัดจากขอบบนโซน (โซน Approval ใช้ตัวใหญ่กว่า จึงต่ำลงมาอีกนิด) */
+export const ZONE_HEADER_BASELINE = 16;
+export const ZONE_HEADER_BASELINE_TALL = 20;
+
+/**
+ * ความสูงของ "แถบหัวโซน" (px จากขอบบนโซน) ที่ป้ายชื่อตัวละครห้ามเข้าไป
+ * — approval มีหัวโซนสองบรรทัด, browser มีหมายเหตุ FIFO ต่อท้ายหัวโซนอีกบรรทัด
+ */
+export function zoneHeaderHeight(zoneId) {
+  return zoneId === "approval" || zoneId === "browser" ? 40 : 22;
+}
+
+/** กรอบโซนเป็น px */
+export function zoneRectPx(rect, tilePx = TILE) {
+  const [rx, ry, rw, rh] = rect;
+  return { x1: rx * tilePx, y1: ry * tilePx, x2: (rx + rw) * tilePx, y2: (ry + rh) * tilePx };
+}
+
+/** พื้นที่ที่ป้ายชื่อ "ตัวละคร" ต้องอยู่ข้างใน = กรอบโซน หักแถบหัวโซนด้านบน และร่นขอบเล็กน้อย */
+export function zoneLabelArea(zone, tilePx = TILE) {
+  const r = zoneRectPx(zone.rect, tilePx);
+  return {
+    x1: r.x1 + ZONE_LABEL_INSET,
+    y1: r.y1 + zoneHeaderHeight(zone.id),
+    x2: r.x2 - ZONE_LABEL_INSET,
+    y2: r.y2 - ZONE_LABEL_INSET,
+  };
+}
+
+/**
+ * กล่องป้ายชื่อของตัวละครที่ยืนอยู่ที่ (footX, footY) — ขนาดตายตัวเสมอ ไม่ขึ้นกับข้อความ/ฟอนต์
+ * นี่คือกล่องเดียวกับที่ render.js วาดแผ่นรอง และเดียวกับที่ layout.test.js ตรวจ containment
+ */
+export function characterLabelBox(footX, footY, tilePx = TILE) {
+  const half = (CHAR_LABEL_W_TILES * tilePx) / 2;
+  const top = footY + CHAR_LABEL_TOP_OFFSET;
+  return { x1: footX - half, y1: top, x2: footX + half, y2: top + CHAR_LABEL_H };
+}
+
+/** กล่องป้ายของ "ที่นั่ง" (พิกัด tile) — wrapper ของ characterLabelBox ให้เทสต์/self-check อ่านง่าย */
+export function slotLabelBox(slot, tilePx = TILE) {
+  return characterLabelBox(slot.x * tilePx, slot.y * tilePx, tilePx);
+}
+
+/**
+ * **เลื่อน** (ไม่ย่อ ไม่ยืด) กล่องให้กลับเข้ามาในกรอบ `bounds`
+ *
+ * ใช้กับป้ายของตัวละครที่กำลัง **เดินเข้า/ออกทางประตู** เท่านั้น — ตอนนั้นตัวละครอยู่นอกทุกโซน จึงไม่มี
+ * โซนไหนการันตีให้ และประตูอยู่ติดผนังล่างพอดี (DOOR_SLOT y = rows - 0.6) ป้ายจึงตกใต้ขอบ canvas
+ * ทั้งใบ นาฬิกาหายไปเลยตลอดช่วงเดิน (~1 วินาที)
+ *
+ * **นี่ไม่ใช่กลไกที่ทำให้ containment ผ่าน** — ป้ายของที่นั่งทุกที่อยู่ในโซนตั้งแต่แรกอยู่แล้ว การ clamp
+ * จึงต้องเป็น no-op กับทุกที่นั่ง (layout.test.js ยืนยันข้อนี้ไว้ ไม่งั้นตาข่าย containment จะกลายเป็นของปลอม)
+ */
+export function clampBoxInto(box, bounds) {
+  const w = box.x2 - box.x1;
+  const h = box.y2 - box.y1;
+  const x1 = Math.min(Math.max(box.x1, bounds.x1), Math.max(bounds.x1, bounds.x2 - w));
+  const y1 = Math.min(Math.max(box.y1, bounds.y1), Math.max(bounds.y1, bounds.y2 - h));
+  return { x1, y1, x2: x1 + w, y2: y1 + h };
+}
+
+/** แผ่นป้ายที่จัดกึ่งกลางแนวนอนที่ cx โดยมีขอบบนที่ top — `w` คือ "ความกว้างสูงสุด" ที่ render จะไม่เกิน */
+function plate(cx, top, w, h) {
+  return { cx, top, w, h, x1: cx - w / 2, y1: top, x2: cx + w / 2, y2: top + h };
+}
+
+/**
+ * ป้ายทุกใบที่อยู่ตำแหน่ง "ตายตัว" ของห้อง (หัวโซน / หมายเหตุ FIFO / ป้ายผู้ถือ Browser / Schedule auto-pause)
+ * — render.js วาดจากค่าชุดนี้ที่เดียว และ layout.test.js ตรวจ containment จากชุดเดียวกัน
+ * ทุกอันประกาศ "ความกว้างสูงสุด" ไว้ แล้ว render ตัดข้อความให้ไม่เกิน ⇒ กล่องที่วาดจริง ⊆ กล่องที่ตรวจเสมอ
+ * @param {ReturnType<typeof buildZones>} zones
+ * @param {number} tilePx
+ * @param {number} [autoPausedCount] จำนวน marker ของ Schedule ที่ auto-pause (0 = ไม่มีป้ายนี้)
+ */
+export function fixedLabels(zones, tilePx = TILE, autoPausedCount = 0) {
+  const out = { zoneHeader: {}, browserNote: null, browserHolder: null, autoPause: null };
+
+  for (const id of ZONE_IDS) {
+    const zone = zones[id];
+    if (!zone) continue;
+    const r = zoneRectPx(zone.rect, tilePx);
+    const tall = id === "approval";
+    const lines = tall ? 2 : 1;
+    out.zoneHeader[id] = {
+      ...plate(
+        (r.x1 + r.x2) / 2,
+        r.y1 + (tall ? ZONE_HEADER_BASELINE_TALL : ZONE_HEADER_BASELINE) - 12,
+        Math.max(0, r.x2 - r.x1 - ZONE_LABEL_INSET * 2),
+        (lines - 1) * LABEL_LINE_H + LABEL_PLATE_H,
+      ),
+      lines,
+      zoneId: id,
+    };
   }
-  // ดันจนหลุดขอบล่างของห้องแล้วป้ายจะหายไปเลย — ยอมให้ทับดีกว่าอ่านไม่เห็น
-  if (opts.maxY != null && box.y2 + shift > opts.maxY) shift = Math.max(0, opts.maxY - box.y2);
-  return shift;
+
+  if (zones.browser) {
+    const r = zoneRectPx(zones.browser.rect, tilePx);
+    const maxW = Math.max(0, r.x2 - r.x1 - ZONE_LABEL_INSET * 2);
+    // หมายเหตุ FIFO อยู่ "ใต้หัวโซน" ไม่ใช่ก้นโซน — ก้นโซนคือแถวคิวแถวสุดท้าย ถ้าวางไว้ที่นั่นจะทับกัน
+    out.browserNote = { ...plate((r.x1 + r.x2) / 2, r.y1 + ZONE_HEADER_BASELINE + 18 - 12, maxW, LABEL_PLATE_H), zoneId: "browser" };
+    // ป้ายผู้ถือ Browser ตอนตัวถือไปยืนโซน Approval (P2 > P3) — วางที่แถวเดียวกับป้ายของที่นั่งผู้ถือ
+    // แต่กว้างเต็มโซน เพราะข้อความมีคำนำ/ต่อท้าย ("🌐 ชื่อ (ถือ Browser)")
+    const holderTop = zones.browser.holderSlot.y * tilePx + CHAR_LABEL_TOP_OFFSET;
+    out.browserHolder = { ...plate((r.x1 + r.x2) / 2, holderTop, maxW, LABEL_PLATE_H), zoneId: "browser" };
+  }
+
+  if (zones.bug && autoPausedCount > 0) {
+    const [bx, by, bw] = zones.bug.rect;
+    // marker วางเป็นกลุ่มกึ่งกลางโซน และบีบระยะห่างลงเมื่อมีหลายอัน เพื่อไม่ให้กลุ่มล้นออกนอกโซน
+    const spacing = Math.min(1.7, (bw - 1) / Math.max(1, autoPausedCount - 1));
+    const markers = [];
+    for (let i = 0; i < autoPausedCount; i++) {
+      markers.push({
+        cx: (bx + bw / 2 + (i - (autoPausedCount - 1) / 2) * spacing) * tilePx,
+        cy: (by + 1.0) * tilePx,
+        r: 12,
+      });
+    }
+    const r = zoneRectPx(zones.bug.rect, tilePx);
+    out.autoPause = {
+      markers,
+      plate: {
+        ...plate((r.x1 + r.x2) / 2, (by + 1.85) * tilePx - 12, Math.max(0, r.x2 - r.x1 - ZONE_LABEL_INSET * 2), LABEL_PLATE_H),
+        zoneId: "bug",
+      },
+    };
+  }
+
+  return out;
+}
+
+/**
+ * self-check เชิงเรขาคณิตของป้ายทั้งห้อง — คืนลิสต์ "สิ่งที่ผิด" ([] = ผ่านหมด)
+ * ใช้ทั้งใน layout.test.js (เป็น assertion หลัก) และตอน bootstrap (เตือนเมื่อ map.json ให้ rect ที่เล็กเกินไป)
+ *
+ * ตรวจสามข้อ เรียงตามความสำคัญ:
+ *  1. `contain`  กล่องป้ายของทุกที่นั่งอยู่ในพื้นที่ป้ายของโซนตัวเอง  ← เกณฑ์หลัก
+ *  2. `fixed`    ป้ายตำแหน่งตายตัวทุกใบอยู่ในกรอบโซนของตัวเอง
+ *  3. `overlap`  ป้ายในโซนเดียวกันไม่ทับกัน (ผลพลอยได้ ไม่ใช่เป้าหมาย)
+ * @returns {{kind:string, zone:string, detail:string}[]}
+ */
+export function labelFitReport(zones, tilePx = TILE, autoPausedCount = 0) {
+  const problems = [];
+  const fmt = (b) =>
+    `[${b.x1.toFixed(1)},${b.y1.toFixed(1)}]–[${b.x2.toFixed(1)},${b.y2.toFixed(1)}]`;
+
+  for (const id of ZONE_IDS) {
+    const zone = zones[id];
+    if (!zone || !Array.isArray(zone.slots)) continue;
+    const area = zoneLabelArea(zone, tilePx);
+    const boxes = zone.slots.map((s) => slotLabelBox(s, tilePx));
+    boxes.forEach((box, i) => {
+      if (!boxInside(box, area)) {
+        problems.push({ kind: "contain", zone: id, detail: `ที่นั่ง ${i}: ป้าย ${fmt(box)} ล้นพื้นที่โซน ${fmt(area)}` });
+      }
+    });
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        if (boxesOverlap(boxes[i], boxes[j])) {
+          problems.push({ kind: "overlap", zone: id, detail: `ป้ายที่นั่ง ${i} กับ ${j} ทับกัน` });
+        }
+      }
+    }
+  }
+
+  const fixed = fixedLabels(zones, tilePx, autoPausedCount);
+  const checkFixed = (name, spec) => {
+    if (!spec) return;
+    const zone = zones[spec.zoneId];
+    if (!zone) return;
+    if (!boxInside(spec, zoneRectPx(zone.rect, tilePx))) {
+      problems.push({ kind: "fixed", zone: spec.zoneId, detail: `${name}: ${fmt(spec)} ล้นกรอบโซน` });
+    }
+  };
+  for (const [id, spec] of Object.entries(fixed.zoneHeader)) checkFixed(`หัวโซน ${id}`, spec);
+  checkFixed("หมายเหตุ FIFO", fixed.browserNote);
+  checkFixed("ป้ายผู้ถือ Browser", fixed.browserHolder);
+  if (fixed.autoPause) {
+    checkFixed("ป้าย Schedule auto-pause", fixed.autoPause.plate);
+    const bugRect = zoneRectPx(zones.bug.rect, tilePx);
+    fixed.autoPause.markers.forEach((m, i) => {
+      const box = { x1: m.cx - m.r, y1: m.cy - m.r, x2: m.cx + m.r, y2: m.cy + m.r };
+      if (!boxInside(box, bugRect)) {
+        problems.push({ kind: "fixed", zone: "bug", detail: `marker auto-pause ${i}: ${fmt(box)} ล้นกรอบโซน` });
+      }
+    });
+  }
+  return problems;
+}
+
+/** เรียกจาก main.js ตอน bootstrap — เตือนใน console เฉย ๆ (rect จาก map.json อาจเล็กกว่าที่ป้ายต้องการ) */
+export function warnLabelFits(zones, tilePx = TILE) {
+  for (const p of labelFitReport(zones, tilePx, 1)) {
+    console.warn(`[office-ui] ป้ายไม่พอดีโซน (${p.kind}) ${p.zone}: ${p.detail}`);
+  }
 }
 
 // ---------------------------------------------------------------------------

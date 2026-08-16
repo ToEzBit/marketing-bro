@@ -18,11 +18,25 @@ import {
   directionFromVector,
   animationFrameIndex,
   boxesOverlap,
-  resolveLabelShift,
+  boxInside,
+  slotLabelBox,
+  characterLabelBox,
+  clampBoxInto,
+  zoneLabelArea,
+  zoneRectPx,
+  fixedLabels,
+  labelFitReport,
+  gridSlots,
+  chooseTilePx,
+  MIN_TILE_PX,
+  CHAR_LABEL_W_TILES,
+  CHAR_LABEL_H,
+  CHAR_LABEL_TOP_OFFSET,
   DEFAULT_ZONE_RECTS,
   ZONE_IDS,
   DOOR_SLOT,
   ROOM,
+  TILE,
 } from "./layout.js";
 import { tilePxOf, PLACEHOLDER_TILE_SIZE } from "./assets.js";
 
@@ -175,6 +189,102 @@ check("tilePxOf ปัดเป็นจำนวนเต็ม (กันร�
   assert.equal(tilePxOf(32, 0), 32); // scale 0/หายไป = 1 ไม่ใช่ห้องกว้าง 0
 });
 
+console.log("\nเลือก tilePx จากพื้นที่ที่มีจริง — ห้องกินพื้นที่จอให้เต็ม (#20)");
+
+/**
+ * กล่องพื้นที่ว่างจริงของแต่ละขนาดหน้าต่าง — **วัดจากเบราว์เซอร์จริง** ไม่ใช่เดาจากสูตร
+ * (Playwright + harness ของ office/index.html: อ่าน .stage.getBoundingClientRect() หัก padding/border
+ *  ด้วยโค้ดชุดเดียวกับ availableRoomBox() ใน main.js) — ถ้าใครแก้ chrome ของหน้า (ความสูง header /
+ *  ความกว้างแผงข้าง / padding) ตัวเลขชุดนี้ต้องวัดใหม่ ไม่ใช่แก้ให้เทสต์ผ่าน
+ */
+const SCREENS = [
+  { name: "1280×800", availW: 906, availH: 673, expect: 32 },
+  { name: "1440×900", availW: 1066, availH: 773, expect: 32 },
+  { name: "1920×1080", availW: 1546, availH: 953, expect: 48 },
+  { name: "2560×1440", availW: 2186, availH: 1313, expect: 64 },
+  { name: "1024×768 (จอเล็ก)", availW: 650, availH: 641, expect: 32 },
+  { name: "1920×1080 เต็มจอ", availW: 1920, availH: 1080, expect: 60 },
+  { name: "2560×1440 เต็มจอ", availW: 2560, availH: 1440, expect: 80 },
+];
+
+check("ทุกขนาดจอในตารางได้ tilePx ตามที่คำนวณด้วยมือไว้ (ห้องกว้าง 32×16 tile)", () => {
+  for (const s of SCREENS) {
+    assert.equal(chooseTilePx({ availW: s.availW, availH: s.availH }), s.expect, `จอ ${s.name}`);
+  }
+});
+
+check("จอเล็กเกินกว่าห้องจะลง → คาที่ MIN_TILE_PX ไม่ย่อลงอีก (ให้เลื่อนดูแทนการย่อจนป้ายพัง)", () => {
+  assert.equal(MIN_TILE_PX, 32);
+  // 1024×768: fit = min(650/32, 641/16) = 20.3 → ถ้าไม่มีพื้นล่าง ห้องจะเหลือ tile 20px ป้ายจะล้นโซนทันที
+  assert.equal(chooseTilePx({ availW: 650, availH: 641 }), 32);
+  assert.equal(chooseTilePx({ availW: 320, availH: 200 }), 32);
+  for (const bad of [0, -100, NaN, undefined]) {
+    assert.equal(chooseTilePx({ availW: bad, availH: 800 }), 32, `availW=${bad}`);
+    assert.equal(chooseTilePx({ availW: 1600, availH: bad }), 32, `availH=${bad}`);
+  }
+});
+
+check("ทวีคูณของ tile ต้นฉบับชนะเมื่อยังกินพื้นที่ได้ ≥88% (พิกเซลอาร์ตคมสนิท)", () => {
+  assert.equal(chooseTilePx({ availW: 32 * 64, availH: 16 * 64 }), 64); // พอดีเป๊ะ = ขยาย 2 เท่า
+  assert.equal(chooseTilePx({ availW: 32 * 70, availH: 16 * 70 }), 64); // 64/70 = 91% ≥ 88% → ยอมเสียที่
+  assert.equal(chooseTilePx({ availW: 32 * 33, availH: 16 * 33 }), 32); // 32/33 = 97%
+});
+
+check("ต่ำกว่า 88% ยอมให้พิกเซลไม่เท่ากัน แล้วใช้ integer ที่ใหญ่สุดที่ยังใส่ได้ (ไม่เหลือขอบดำครึ่งจอ)", () => {
+  assert.equal(chooseTilePx({ availW: 32 * 76, availH: 16 * 76 }), 76); // 64/76 = 84% < 88%
+  assert.equal(chooseTilePx({ availW: 32 * 63, availH: 16 * 63 }), 63); // 32/63 = 51%
+  assert.equal(chooseTilePx({ availW: 32 * 48.9, availH: 16 * 60 }), 48); // เศษถูกปัดลงเป็นจำนวนเต็ม
+});
+
+check("คืนจำนวนเต็มเสมอ และไม่มีวันทำให้ห้องล้นกรอบที่ให้มา (เว้นตอนคาที่ MIN_TILE_PX)", () => {
+  for (let w = 700; w <= 3000; w += 7) {
+    const tilePx = chooseTilePx({ availW: w, availH: 1200 });
+    assert.ok(Number.isInteger(tilePx), `availW=${w} ได้ ${tilePx} ซึ่งไม่ใช่จำนวนเต็ม`);
+    assert.ok(tilePx >= MIN_TILE_PX, `availW=${w} ได้ ${tilePx} ซึ่งต่ำกว่า MIN_TILE_PX`);
+    if (tilePx > MIN_TILE_PX) {
+      assert.ok(tilePx * ROOM.cols <= w, `availW=${w} ได้ห้องกว้าง ${tilePx * ROOM.cols} ซึ่งล้นกรอบ`);
+      assert.ok(tilePx * ROOM.rows <= 1200, `availW=${w}: ห้องสูง ${tilePx * ROOM.rows} ล้นกรอบ`);
+    }
+  }
+});
+
+check("ขนาดห้อง/ขนาด tile ต้นฉบับมาจาก map.json+manifest ห้าม assume 32×16 หรือ 32px (§8.2)", () => {
+  // ห้องสูงกว่า (40×30) ⇒ ความสูงเป็นตัวบีบแทนความกว้าง
+  assert.equal(chooseTilePx({ availW: 4000, availH: 16 * 60, cols: 40, rows: 30 }), 32);
+  assert.equal(chooseTilePx({ availW: 40 * 50, availH: 30 * 50, cols: 40, rows: 30 }), 50);
+  // ชุด asset ที่ tile ต้นฉบับ 16px → "ทวีคูณ" คือทวีคูณของ 16 (แต่ยังห้ามต่ำกว่า MIN_TILE_PX)
+  assert.equal(chooseTilePx({ availW: 32 * 50, availH: 16 * 50, baseTilePx: 16 }), 48);
+  assert.equal(chooseTilePx({ availW: 320, availH: 200, baseTilePx: 16 }), 32);
+  // ชุดที่ tile ต้นฉบับใหญ่กว่า 32 ห้ามถูกย่อลงมา 32 (ย่อภาพพิกเซล = เละกว่าห้องล้นจอ)
+  assert.equal(chooseTilePx({ availW: 320, availH: 200, baseTilePx: 64 }), 64);
+  assert.equal(chooseTilePx({ availW: 32 * 130, availH: 16 * 130, baseTilePx: 64 }), 128);
+});
+
+check("★ containment ยังจริงที่ tilePx *ทุกค่าที่ chooseTilePx เลือกจริง* (ไม่ใช่แค่ค่าที่เลือกมาเทสต์เอง)", () => {
+  const chosen = new Set(SCREENS.map((s) => chooseTilePx({ availW: s.availW, availH: s.availH })));
+  // กวาดทุกความกว้างจอที่เป็นไปได้ด้วย เผื่อมีค่าแปลก ๆ ที่ตารางข้างบนไม่โดน
+  for (let w = 600; w <= 4000; w += 13) chosen.add(chooseTilePx({ availW: w, availH: 2200 }));
+  for (const tilePx of chosen) {
+    for (const autoPaused of [0, 3]) {
+      const problems = labelFitReport(zones, tilePx, autoPaused);
+      assert.deepEqual(problems, [], `tilePx=${tilePx}: ${problems.map((p) => p.detail).join(" | ")}`);
+    }
+  }
+});
+
+check("★ ป้ายของทุกที่นั่งอยู่ในห้องอยู่แล้วที่ tilePx ทุกค่าที่เลือกจริง (clamp ยังเป็น no-op)", () => {
+  for (const s of SCREENS) {
+    const tilePx = chooseTilePx({ availW: s.availW, availH: s.availH });
+    const bounds = { x1: 4, y1: 4, x2: ROOM.cols * tilePx - 4, y2: ROOM.rows * tilePx - 4 };
+    for (const id of ZONE_IDS) {
+      zones[id].slots.forEach((slot, i) => {
+        const raw = slotLabelBox(slot, tilePx);
+        assert.deepEqual(clampBoxInto(raw, bounds), raw, `จอ ${s.name} โซน ${id} ที่นั่ง ${i}`);
+      });
+    }
+  }
+});
+
 console.log("\nเลือกแถวสไปรต์จากเวกเตอร์การเคลื่อนที่ (§7.4)");
 
 check("แกนที่ขยับเยอะกว่าเป็นตัวตัดสิน และ y ที่เพิ่มขึ้นคือเดินลง (จอเป็น y ลง)", () => {
@@ -220,7 +330,14 @@ check("animationFrameIndex คืน 0 อย่างปลอดภัยเ�
   assert.equal(animationFrameIndex(-500, 9, 12), 0);
 });
 
-console.log("\nกันป้ายชื่อทับกัน (§7.2)");
+console.log("\nป้ายอยู่ในกรอบโซนของตัวเอง — containment (§7.2)");
+//
+// นี่คือ "ตาข่าย" ที่หายไปตอนบั๊กป้ายกลืนห้อง: บั๊กของฟังก์ชันวาดป้ายสามรุ่นที่ผ่านมาไม่มีเทสต์ไหนจับได้เลย
+// เพราะเกณฑ์ที่ใช้วัดตอนนั้นคือ "ป้ายห้ามทับกัน" ซึ่งผ่านได้ด้วยการดันป้ายออกไปนอกโซนตัวเอง
+//
+// เกณฑ์ที่ถูกคือ containment: กล่องป้ายทุกใบต้องอยู่ในกรอบโซนของตัวเอง และเพราะโซนไม่ซ้อนกัน
+// (พิสูจน์แล้วด้านบนด้วย findOverlappingZones) containment จึง **implies** ว่าป้ายข้ามโซนไม่ได้
+// และป้ายของคนละโซนทับกันไม่ได้ ส่วน "ป้ายในโซนเดียวกันไม่ทับกัน" เป็นผลพลอยได้ที่ตรวจเพิ่มไว้ท้ายสุด
 
 const box = (x1, y1, x2, y2) => ({ x1, y1, x2, y2 });
 
@@ -231,54 +348,162 @@ check("boxesOverlap ตรวจชนแบบ AABB และนับ 'เฉ�
   assert.equal(boxesOverlap(box(0, 0, 10, 10), box(11, 0, 20, 10), 2), true); // ห่าง 1px < gap 2
 });
 
-check("ป้ายที่ไม่ชนใคร ไม่ถูกขยับ", () => {
-  assert.equal(resolveLabelShift(box(0, 0, 100, 30), []), 0);
-  assert.equal(resolveLabelShift(box(0, 0, 100, 30), [box(200, 0, 300, 30)]), 0);
+check("boxInside: ขอบชนขอบพอดีถือว่าอยู่ข้างใน ล้ำออกไปแม้ด้านเดียวถือว่าไม่อยู่", () => {
+  const outer = box(0, 0, 100, 100);
+  assert.equal(boxInside(box(0, 0, 100, 100), outer), true);
+  assert.equal(boxInside(box(10, 10, 90, 90), outer), true);
+  assert.equal(boxInside(box(-1, 10, 90, 90), outer), false);
+  assert.equal(boxInside(box(10, 10, 101, 90), outer), false);
+  assert.equal(boxInside(box(10, 10, 90, 101), outer), false);
 });
 
-check("ป้ายที่ชน ถูกดันลงไปใต้ตัวที่ชน ไม่ใช่ขยับทีละก้าวคงที่ (ก้าวสั้นกว่าป้ายสองบรรทัดจะทับซ้ำ)", () => {
-  const mine = box(0, 100, 100, 129); // ป้ายสองบรรทัด สูง 29px
-  const blocker = box(50, 100, 150, 129);
-  const shift = resolveLabelShift(mine, [blocker], { gap: 2 });
-  assert.ok(shift > 0, "ต้องถูกดันลง");
-  const moved = { ...mine, y1: mine.y1 + shift, y2: mine.y2 + shift };
-  assert.equal(boxesOverlap(moved, blocker, 2), false, "ดันแล้วต้องพ้นจริง ไม่ใช่แค่ขยับ");
-  assert.ok(moved.y1 > blocker.y2, "ขอบบนต้องต่ำกว่าขอบล่างของตัวที่ชน");
+check("กล่องป้ายมีขนาดตายตัว ไม่ขึ้นกับข้อความ/ฟอนต์ และผูกกับเท้าตัวละคร", () => {
+  const b = characterLabelBox(200, 300, 32);
+  assert.equal(b.x2 - b.x1, CHAR_LABEL_W_TILES * 32, "กว้างเท่า CHAR_LABEL_W_TILES เสมอ");
+  assert.equal(b.y2 - b.y1, CHAR_LABEL_H, "สูงคงที่ (สองบรรทัดเสมอ)");
+  assert.equal((b.x1 + b.x2) / 2, 200, "กึ่งกลางตรงกับตัวละคร");
+  assert.equal(b.y1, 300 + CHAR_LABEL_TOP_OFFSET, "อยู่ใต้เท้าตัวละคร");
+  // ความกว้างสเกลตาม tile ⇒ ห้องที่ tile ใหญ่ขึ้น ป้ายก็ใหญ่ตามสัดส่วนเดิม
+  assert.equal(characterLabelBox(0, 0, 64).x2 - characterLabelBox(0, 0, 64).x1, CHAR_LABEL_W_TILES * 64);
 });
 
-check("โซน grid 3 คอลัมน์ที่ป้ายกว้างกว่าระยะห่างที่นั่ง: ทั้ง 3 ป้ายไม่ทับกันเลย (เกณฑ์รับข้อ E)", () => {
-  // ระยะห่างที่นั่งจริงของ stopped/bug = 1.7 tile = 54.4px แต่ป้าย "ชื่อ + นาฬิกา" กว้าง ~110px
-  const placed = [];
-  for (const cx of [73.6, 128, 182.4]) {
-    const start = box(cx - 55, 200, cx + 55, 229);
-    const shift = resolveLabelShift(start, placed, { gap: 2 });
-    placed.push({ ...start, y1: start.y1 + shift, y2: start.y2 + shift });
+check("★ ป้ายของ *ทุกที่นั่ง* ใน *ทุกโซน* อยู่ในกรอบโซนของตัวเอง (เกณฑ์หลักของ #20)", () => {
+  const problems = labelFitReport(zones, TILE, 1);
+  assert.deepEqual(problems, [], problems.map((p) => `${p.kind}/${p.zone}: ${p.detail}`).join("\n"));
+});
+
+check("★ containment ยังจริงเมื่อ tile ใหญ่ขึ้น (manifest ตั้ง scale อื่นได้ — §8.2 ห้าม assume ขนาด)", () => {
+  for (const tilePx of [32, 40, 48, 64]) {
+    const problems = labelFitReport(zones, tilePx, 1);
+    assert.deepEqual(problems, [], `tilePx=${tilePx}: ${problems.map((p) => p.detail).join(" | ")}`);
   }
-  for (let i = 0; i < placed.length; i++) {
-    for (let j = i + 1; j < placed.length; j++) {
-      assert.equal(boxesOverlap(placed[i], placed[j], 2), false, `ป้าย ${i} กับ ${j} ยังทับกัน`);
+});
+
+check("ตรวจซ้ำแบบตรง ๆ ไม่ผ่าน labelFitReport — ทุกที่นั่งทุกโซน เทียบกับกรอบโซนดิบ ๆ", () => {
+  for (const id of ZONE_IDS) {
+    const zone = zones[id];
+    const rect = zoneRectPx(zone.rect, TILE);
+    zone.slots.forEach((slot, i) => {
+      const b = slotLabelBox(slot, TILE);
+      assert.ok(
+        b.x1 >= rect.x1 && b.x2 <= rect.x2 && b.y1 >= rect.y1 && b.y2 <= rect.y2,
+        `โซน ${id} ที่นั่ง ${i}: ป้าย [${b.x1},${b.y1}]–[${b.x2},${b.y2}] ล้นกรอบโซน [${rect.x1},${rect.y1}]–[${rect.x2},${rect.y2}]`,
+      );
+    });
+  }
+});
+
+check("ป้ายตัวละครไม่ล้ำแถบหัวโซน (หัวโซนต้องอ่านออกเสมอ — spec §7.2)", () => {
+  for (const id of ZONE_IDS) {
+    const area = zoneLabelArea(zones[id], TILE);
+    const header = fixedLabels(zones, TILE).zoneHeader[id];
+    assert.ok(header.y2 <= area.y1, `หัวโซน ${id} ล้ำเข้าไปในพื้นที่ป้ายตัวละคร`);
+    for (const slot of zones[id].slots) {
+      assert.ok(slotLabelBox(slot, TILE).y1 >= area.y1, `ป้ายในโซน ${id} ล้ำขึ้นไปทับหัวโซน`);
     }
   }
 });
 
-check("ป้าย 6 อันซ้อนที่เดียวกันหมด (คิว Browser ล้นช่อง) ก็ยังแยกกันได้ครบ", () => {
-  const placed = [];
-  for (let i = 0; i < 6; i++) {
-    const start = box(400, 150, 510, 179);
-    const shift = resolveLabelShift(start, placed, { gap: 2, maxPush: 10 });
-    placed.push({ ...start, y1: start.y1 + shift, y2: start.y2 + shift });
-  }
-  for (let i = 0; i < placed.length; i++) {
-    for (let j = i + 1; j < placed.length; j++) {
-      assert.equal(boxesOverlap(placed[i], placed[j], 2), false, `ป้าย ${i} กับ ${j} ทับกัน`);
+check("ผลพลอยได้: ป้ายในโซนเดียวกันไม่ทับกันเลยสักคู่ (ไม่ต้องมี pass ดันป้ายหลบกัน)", () => {
+  for (const id of ZONE_IDS) {
+    const boxes = zones[id].slots.map((s) => slotLabelBox(s, TILE));
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        assert.equal(boxesOverlap(boxes[i], boxes[j]), false, `โซน ${id}: ป้ายที่นั่ง ${i} กับ ${j} ทับกัน`);
+      }
     }
   }
 });
 
-check("ไม่ดันจนป้ายหลุดขอบล่างของห้อง (ยอมให้ทับดีกว่าอ่านไม่เห็น)", () => {
-  const start = box(0, 480, 100, 509);
-  const shift = resolveLabelShift(start, [box(0, 480, 100, 509)], { gap: 2, maxY: 510 });
-  assert.equal(start.y2 + shift <= 510, true);
+check("โซนที่เตี้ย/แคบเกินกว่ากล่องป้ายจะลง ต้องถูก 'จับได้' ไม่ใช่เงียบ (เทสต์ว่าตาข่ายทำงานจริง)", () => {
+  const cramped = buildZones({ lounge: [1, 1, 2, 2] });
+  const problems = labelFitReport(cramped, TILE);
+  assert.ok(
+    problems.some((p) => p.zone === "lounge" && p.kind === "contain"),
+    "โซนเล็กจนป้ายไม่ลง ต้องรายงาน contain",
+  );
+});
+
+check("ที่นั่งที่ถูกดันออกนอกโซน (padX ติดลบ) ต้องถูกจับได้ — กันการรีแฟกเตอร์ทำ pad พังเงียบ ๆ", () => {
+  const broken = buildZones();
+  broken.stopped.slots = gridSlots(broken.stopped.rect, 3, 1, { padX: 1.3, padTop: 2.4 });
+  const problems = labelFitReport(broken, TILE);
+  assert.ok(problems.some((p) => p.zone === "stopped" && p.kind === "contain"), "3 คอลัมน์ใน 6 tile ต้องล้น");
+  assert.ok(problems.some((p) => p.zone === "stopped" && p.kind === "overlap"), "และต้องทับกันเองด้วย");
+});
+
+console.log("\nป้ายของตัวละครที่กำลังเดินเข้า/ออกทางประตู (อยู่นอกทุกโซนชั่วคราว)");
+
+check("ป้ายที่ประตูตกใต้ขอบห้องทั้งใบ ถ้าไม่ดึงกลับ — นาฬิกาจะหายตลอดช่วงเดินเข้า/ออก", () => {
+  const H = ROOM.rows * TILE;
+  const raw = characterLabelBox(DOOR_SLOT.x * TILE, DOOR_SLOT.y * TILE, TILE);
+  assert.ok(raw.y2 > H, `ป้ายที่ประตูต้องตกใต้ขอบห้องจริง (y2=${raw.y2} vs H=${H}) ไม่งั้นเทสต์นี้ไม่ได้ทดสอบอะไร`);
+  const bounds = { x1: 4, y1: 4, x2: ROOM.cols * TILE - 4, y2: H - 4 };
+  const fixed = clampBoxInto(raw, bounds);
+  assert.ok(boxInside(fixed, bounds), "ดึงกลับแล้วต้องอยู่ในห้อง");
+  assert.equal(fixed.x2 - fixed.x1, raw.x2 - raw.x1, "เลื่อนเท่านั้น ห้ามย่อ");
+  assert.equal(fixed.y2 - fixed.y1, raw.y2 - raw.y1, "เลื่อนเท่านั้น ห้ามย่อ");
+});
+
+check("★ clamp ต้องเป็น no-op กับที่นั่งทุกที่ในทุกโซน — ไม่งั้นตาข่าย containment กลายเป็นของปลอม", () => {
+  const bounds = { x1: 4, y1: 4, x2: ROOM.cols * TILE - 4, y2: ROOM.rows * TILE - 4 };
+  for (const id of ZONE_IDS) {
+    zones[id].slots.forEach((slot, i) => {
+      const raw = slotLabelBox(slot, TILE);
+      assert.deepEqual(clampBoxInto(raw, bounds), raw, `โซน ${id} ที่นั่ง ${i}: ป้ายต้องอยู่ในห้องอยู่แล้ว`);
+    });
+  }
+});
+
+console.log("\nป้ายตำแหน่งตายตัว (หัวโซน / FIFO / ผู้ถือ Browser / Schedule auto-pause)");
+
+check("ป้ายตำแหน่งตายตัวทุกใบอยู่ในกรอบโซนของตัวเอง รวม marker ของ auto-pause", () => {
+  for (const count of [0, 1, 3, 6]) {
+    const problems = labelFitReport(zones, TILE, count).filter((p) => p.kind === "fixed");
+    assert.deepEqual(problems, [], `auto-paused ${count} อัน: ${problems.map((p) => p.detail).join(" | ")}`);
+  }
+});
+
+check("หมายเหตุ FIFO ย้ายมาอยู่ใต้หัวโซน Browser ไม่ใช่ก้นโซน (ก้นโซนคือแถวคิวแถวสุดท้าย)", () => {
+  const f = fixedLabels(zones, TILE);
+  const browserRect = zoneRectPx(zones.browser.rect, TILE);
+  assert.ok(f.browserNote.y1 < browserRect.y1 + 48, "ต้องอยู่ช่วงหัวโซน");
+  for (const slot of zones.browser.slots) {
+    assert.equal(boxesOverlap(f.browserNote, slotLabelBox(slot, TILE)), false, "ต้องไม่ทับป้ายของช่องคิว");
+  }
+});
+
+check("ป้ายผู้ถือ Browser (ตอนตัวถือไปยืนโซน Approval) ไม่ทับป้ายของช่องคิวที่เหลือ", () => {
+  const f = fixedLabels(zones, TILE);
+  for (const slot of zones.browser.waiterSlots) {
+    assert.equal(boxesOverlap(f.browserHolder, slotLabelBox(slot, TILE)), false);
+  }
+});
+
+check("ป้าย/marker ของ Schedule auto-pause ไม่ทับป้ายตัวละครในโซน bug", () => {
+  const f = fixedLabels(zones, TILE, 3);
+  const charBoxes = zones.bug.slots.map((s) => slotLabelBox(s, TILE));
+  for (const b of charBoxes) {
+    assert.equal(boxesOverlap(f.autoPause.plate, b), false, "ป้าย auto-pause ทับป้ายตัวละคร");
+    for (const m of f.autoPause.markers) {
+      const mb = { x1: m.cx - m.r, y1: m.cy - m.r, x2: m.cx + m.r, y2: m.cy + m.r };
+      assert.equal(boxesOverlap(mb, b), false, "marker auto-pause ทับป้ายตัวละคร");
+    }
+  }
+});
+
+console.log("\nกริดที่นั่งที่ไม่เต็มแถว (gridSlots count)");
+
+check("count น้อยกว่า cols×rows: ตัดที่นั่งส่วนเกิน และแถวสุดท้ายจัดกึ่งกลาง rect", () => {
+  const slots = gridSlots([1, 8, 6, 6], 2, 2, { padX: 1.5, padTop: 2.4, padBottom: 1.2, count: 3 });
+  assert.equal(slots.length, 3);
+  assert.deepEqual(slots.map((s) => s.x), [2.5, 5.5, 4]); // แถวล่างอยู่กลางโซน (1 + 6/2 = 4)
+  assert.notEqual(slots[0].y, slots[2].y, "ต้องอยู่คนละแถว");
+});
+
+check("ไม่ใส่ count = พฤติกรรมเดิมเป๊ะ (กริดเต็ม)", () => {
+  const full = gridSlots([1, 1, 6, 6], 2, 2, { padX: 1.5 });
+  assert.equal(full.length, 4);
 });
 
 console.log("\nจำนวนที่นั่งต่อโซน (§7.2)");
@@ -287,7 +512,7 @@ check("lounge เป็น grid 2×2 = 4 ที่นั่ง", () => {
   assert.equal(zones.lounge.slots.length, 4);
 });
 
-check("stopped เป็น grid 3×1 = 3 ที่นั่ง", () => {
+check("stopped มี 3 ที่นั่ง (ทรงพีระมิด 2+1 — 3 คอลัมน์ใน 6 tile ทำให้ป้ายชนกันแน่นอน)", () => {
   assert.equal(zones.stopped.slots.length, 3);
 });
 
@@ -295,7 +520,7 @@ check("desks เป็น grid 2×3 = 6 ที่นั่ง", () => {
   assert.equal(zones.desks.slots.length, 6);
 });
 
-check("bug เป็น grid 3×1 = 3 ที่นั่ง", () => {
+check("bug มี 3 ที่นั่ง (ทรงพีระมิด 2+1 เหมือน stopped)", () => {
   assert.equal(zones.bug.slots.length, 3);
 });
 

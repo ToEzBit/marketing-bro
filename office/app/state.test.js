@@ -136,6 +136,50 @@ check("เริ่ม glide ใหม่จากตำแหน่งบนจ
   );
 });
 
+console.log("\nsetTilePx — ห้องขยาย/หดตามหน้าต่าง (#20)");
+
+check("ตัวละครไปโผล่ที่นั่งเดิมของห้องขนาดใหม่ทันที ไม่ glide ไม่เดินเข้าประตูใหม่", () => {
+  const room = createRoomState(zones, { tilePx: 32 });
+  room.applySnapshot(snapshotOf([baseChar({ id: "t1", state: "working" })]), NOW);
+  const settled = NOW + 60_000; // เดินถึงที่นั่งเรียบร้อยแล้ว
+  room.getDrawList(settled);
+  const before = { ...room._posCache.get("t1").cur };
+
+  room.setTilePx(64);
+  const cache = room._posCache.get("t1");
+  assert.deepEqual(cache.cur, { x: before.x * 2, y: before.y * 2 }, "พิกัดบนจอต้องคูณสองพร้อมห้อง");
+  // ที่นั่งเดิมในห้องใหญ่ = ปลายทางใหม่พอดี ⇒ applySnapshot รอบถัดไปต้องไม่สั่ง glide (ไม่มีอะไรขยับจริง)
+  room.applySnapshot(snapshotOf([baseChar({ id: "t1", state: "working" })]), settled + 1);
+  assert.equal(room._posCache.get("t1").dur, 0, "ต้องไม่มี glide เกิดขึ้นจากการเปลี่ยนขนาดห้อง");
+  assert.equal(room.getDrawList(settled + 1).length, 1, "ห้ามหายไปแล้วเดินเข้าประตูใหม่");
+});
+
+check("leg ที่กำลังเดินอยู่ยังถูกต้อง — ระยะทางวัดเป็น tile จึงไม่เปลี่ยนตามสเกล", () => {
+  const room = createRoomState(zones, { tilePx: 32 });
+  room.applySnapshot(snapshotOf([baseChar({ id: "t1", state: "idle" })]), NOW);
+  room.applySnapshot(snapshotOf([baseChar({ id: "t1", state: "working" })]), NOW + 60_000);
+  const before = room._posCache.get("t1");
+  const dur = before.dur;
+  const from = { ...before.from };
+  const to = { ...before.to };
+
+  room.setTilePx(48);
+  const after = room._posCache.get("t1");
+  assert.equal(after.dur, dur, "ระยะเวลาเดินต้องเท่าเดิม (ระยะทางเป็น tile ไม่ใช่ px)");
+  assert.deepEqual(after.from, { x: from.x * 1.5, y: from.y * 1.5 });
+  assert.deepEqual(after.to, { x: to.x * 1.5, y: to.y * 1.5 });
+});
+
+check("ค่าที่ไม่ถูกต้อง/ค่าเดิม ไม่แตะแคชเลย (กันพิกัดกลายเป็น NaN ทั้งห้อง)", () => {
+  const room = createRoomState(zones, { tilePx: 32 });
+  room.applySnapshot(snapshotOf([baseChar({ id: "t1", state: "working" })]), NOW);
+  const snapshotPos = { ...room._posCache.get("t1").to };
+  for (const bad of [0, -32, NaN, undefined, null, "x", 32]) {
+    room.setTilePx(bad);
+    assert.deepEqual(room._posCache.get("t1").to, snapshotPos, `setTilePx(${String(bad)}) ต้องไม่ทำอะไร`);
+  }
+});
+
 console.log("\napplySnapshot — หาย (despawn)");
 
 check("id ที่หายไปจาก snapshot ถูกสั่งเดินออกประตูแล้วค่อยลบออกจาก cache จริง (ไม่ใช่หายทันที)", () => {
@@ -206,6 +250,52 @@ check("id ซ้ำกันข้าม sessions/outcomeFeed ใช้ตัว
   room.applySnapshot(snap, NOW);
   const drawn = room.getDrawList(NOW);
   assert.equal(drawn.filter((d) => d.id === "dup").length, 1);
+});
+
+console.log("\nโซนล้น (§7.2) — ตัวที่ไม่เหลือที่นั่งถูกทำเครื่องหมาย overflow เพื่อไม่ให้ยัดป้ายจนล้นห้อง");
+
+check("ตัวละครเท่ากับจำนวนที่นั่งพอดี ไม่มีใครเป็น overflow", () => {
+  const room = createRoomState(zones);
+  const chars = Array.from({ length: zones.lounge.slots.length }, (_, i) =>
+    baseChar({ id: `idle-${i}`, state: "idle" }),
+  );
+  room.applySnapshot(snapshotOf(chars), NOW);
+  const drawn = room.getDrawList(NOW);
+  assert.equal(drawn.length, chars.length);
+  assert.equal(drawn.filter((d) => d.meta.overflow).length, 0);
+});
+
+check("ตัวละครมากกว่าที่นั่ง: ส่วนเกินเป็น overflow ทุกตัว ที่เหลือได้ที่นั่งของตัวเองครบ", () => {
+  const room = createRoomState(zones);
+  const seats = zones.lounge.slots.length;
+  const extra = 7;
+  const chars = Array.from({ length: seats + extra }, (_, i) => baseChar({ id: `idle-${i}`, state: "idle" }));
+  room.applySnapshot(snapshotOf(chars), NOW);
+  // ดูหลังเดินเข้าห้องเสร็จแล้ว (ตอน NOW ทุกตัวยังยืนซ้อนกันอยู่ที่ประตู)
+  const drawn = room.getDrawList(NOW + 3000);
+  assert.equal(drawn.filter((d) => d.meta.overflow).length, extra, "จำนวน overflow ต้องเท่ากับส่วนที่ล้นจริง");
+  const seated = drawn.filter((d) => !d.meta.overflow);
+  assert.equal(seated.length, seats);
+  // ตัวที่ได้ที่นั่งต้องอยู่กันคนละที่จริง ๆ (ไม่ใช่ยัดที่นั่งสุดท้ายรวมกันเหมือนพฤติกรรมเดิม)
+  assert.equal(new Set(seated.map((d) => `${d.x},${d.y}`)).size, seats);
+});
+
+check("คิว Browser ที่ยาวเกินช่องคิว: ตัวที่เกินเป็น overflow ส่วนผู้ถือไม่มีวันเป็น overflow", () => {
+  const room = createRoomState(zones);
+  const waiterCount = zones.browser.waiterSlots.length;
+  const ids = Array.from({ length: waiterCount + 2 }, (_, i) => `w-${i}`);
+  const q = {
+    holder: "holder-1",
+    waiting: ids.map((id, i) => ({ id, since: NOW - i * 1000, deadlineAt: null })),
+  };
+  const chars = [baseChar({ id: "holder-1", state: "working" }), ...ids.map((id) => baseChar({ id, state: "working" }))];
+  room.applySnapshot(snapshotOf(chars, q), NOW);
+  const drawn = room.getDrawList(NOW);
+  assert.equal(drawn.find((d) => d.id === "holder-1").meta.overflow, false);
+  assert.equal(drawn.filter((d) => d.meta.overflow).length, 2);
+  for (let i = 0; i < waiterCount; i++) {
+    assert.equal(drawn.find((d) => d.id === `w-${i}`).meta.overflow, false, `คิวที่ ${i + 1} ต้องได้ช่องของตัวเอง`);
+  }
 });
 
 console.log("\nนาฬิกา (spec §5.6) — countdown เฉพาะ approval และ Run ที่รอคิว Browser เท่านั้น");

@@ -26,6 +26,13 @@ body {
   font-family: -apple-system, "Segoe UI", "Noto Sans Thai", "Tahoma", sans-serif;
 }
 
+/* หน้าเป็นคอลัมน์เดียว: header / main (ยืดกินที่เหลือ) / footer — main ต้องได้ความสูงจริงเป็นตัวเลข
+   ไม่งั้น .stage วัดพื้นที่ไม่ได้ แล้วห้องก็ไม่รู้ว่าขยายได้แค่ไหน */
+body {
+  display: flex;
+  flex-direction: column;
+}
+
 header {
   display: flex;
   align-items: center;
@@ -62,11 +69,28 @@ header .sub {
   border-color: var(--bad);
 }
 
+/* ปุ่มบนหน้านี้ทำได้อย่างเดียวคือเปลี่ยนการแสดงผลฝั่ง client (ADR 0002: Office UI สั่งงานอะไรไม่ได้) */
+.btn-ghost {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.btn-ghost:hover {
+  border-color: var(--accent);
+}
+
 main {
   display: flex;
   gap: 12px;
   padding: 12px;
-  align-items: flex-start;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-height: 0; /* ไม่งั้นเนื้อหาดันความสูงจนหน้าเลื่อนทั้งหน้า แทนที่จะเลื่อนแค่ในห้อง */
 }
 
 .stage {
@@ -77,6 +101,11 @@ main {
   padding: 8px;
   overflow: auto;
   flex: 1 1 auto;
+  display: flex;
+  /* flex item ปกติมี min-width/min-height: auto = "ห้ามเล็กกว่าเนื้อหา" ซึ่งจะทำให้กล่องนี้โตตาม canvas
+     แล้ว main.js วัดพื้นที่ได้ใหญ่ขึ้น → tilePx ใหญ่ขึ้น → กล่องโตอีก วนไม่จบ ต้องปิดด้วย 0 ทั้งสองแกน */
+  min-width: 0;
+  min-height: 0;
 }
 
 canvas#room {
@@ -84,7 +113,12 @@ canvas#room {
   image-rendering: pixelated;
   background: #0e1116;
   border-radius: 6px;
-  max-width: 100%;
+  /* ห้ามใส่ max-width/width เป็น % เด็ดขาด — ขนาด CSS ของ canvas ต้องเท่ากับขนาดที่วาดจริงเป๊ะ ๆ
+     (1) ยืดด้วย CSS = ตัวหนังสือไทยเบลอ (สระบน/ล่างเละก่อนใคร) ห้องขยายด้วยการเพิ่ม tilePx เท่านั้น
+     (2) toCanvasCoords() ใน main.js แปลงพิกัดคลิกด้วย renderer.W / rect.width ซึ่งต้องได้ 1 เสมอ
+     margin:auto = จัดกึ่งกลางทั้งสองแกนเมื่อมีที่เหลือ แต่ถ้าห้องใหญ่กว่ากรอบจะกลับไปชิดมุมซ้ายบน
+     ทำให้ยัง **เลื่อนดูได้ครบทั้งห้อง** (justify/align-content: center จะตัดขอบบน-ซ้ายจนเลื่อนไปไม่ถึง) */
+  margin: auto;
 }
 
 .disconnected-overlay {
@@ -124,6 +158,8 @@ aside.panel {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-height: 0;
+  overflow: auto; /* การ์ดข้อมูลยาว ๆ เลื่อนในแผงเอง ไม่ดันความสูงหน้าจนห้องหด */
 }
 
 section {
@@ -223,4 +259,59 @@ footer {
 }
 footer code {
   color: var(--text);
+}
+
+/* ---------------- โหมดเต็มจอ (main.js สลับคลาสนี้บน <body> และจำไว้ใน localStorage) ----------------
+   ซ่อนทุกอย่างที่ไม่ใช่ห้อง แล้วเอา padding/ขอบของ .stage ออก ⇒ พื้นที่ที่ main.js วัดได้ = ทั้งหน้าต่าง
+   (availableRoomBox() อ่าน padding/border จาก computed style จึงปรับตามเองโดยไม่ต้องแก้ตัวเลขสองที่) */
+
+.fs-exit {
+  display: none;
+}
+
+body.room-fullscreen > header,
+body.room-fullscreen > footer {
+  display: none;
+}
+
+body.room-fullscreen main {
+  padding: 0;
+  gap: 0;
+}
+
+body.room-fullscreen .stage {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: var(--bg);
+}
+
+body.room-fullscreen canvas#room {
+  border-radius: 0;
+}
+
+/* แผงข้างลอยทับห้องแทนที่จะกินความกว้าง — ซ่อน legend ไว้ แต่ยังคลิกตัวละครดูการ์ดได้เหมือนเดิม
+   (การ์ดเองยัง [hidden] อยู่จนกว่าจะคลิก ⇒ ปกติจะไม่มีอะไรบังห้องเลย) */
+body.room-fullscreen aside.panel {
+  position: fixed;
+  top: 46px;
+  right: 10px;
+  z-index: 15;
+  max-height: calc(100% - 56px);
+}
+body.room-fullscreen aside.panel > section:not(.infocard) {
+  display: none;
+}
+
+body.room-fullscreen .fs-exit {
+  display: inline-flex;
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  z-index: 20;
+  opacity: 0.35;
+  background: rgba(20, 22, 28, 0.8);
+}
+body.room-fullscreen .fs-exit:hover {
+  opacity: 1;
 }
