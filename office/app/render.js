@@ -22,6 +22,7 @@ import {
   pickCharacterFolder,
   tileLayersOf,
   animationFrameIndex,
+  restFrameIndex,
   characterLabelBox,
   clampBoxInto,
   fixedLabels,
@@ -29,6 +30,7 @@ import {
   LABEL_PLATE_H,
   LABEL_PLATE_PAD_X,
 } from "./layout.js";
+import { overflowGroups } from "./state.js";
 
 const STATE_META = {
   idle: { label: "ว่าง", icon: "💤", color: "#5aa9e6" },
@@ -42,6 +44,21 @@ const ROLE_META = {
   waiter: { icon: "⏳", color: "#8b6cff" },
 };
 
+/**
+ * สีของ "เฟอร์นิเจอร์เวกเตอร์" ทุกชิ้น — รวมไว้ที่เดียวเพราะมันคือกลุ่มที่ถูกวาดเฉพาะโหมดไม่มีผังห้องจริง
+ * (ดู drawDecorations) เทสต์ใช้ค่าชุดนี้จับว่ามันไม่ถูกวาดทับ tile จริง โดยไม่ต้อง hard-code สีในเทสต์
+ */
+export const VECTOR_FURNITURE_COLORS = {
+  desk: "#5b4327",
+  screen: "#111318", // จอมอนิเตอร์ — ใช้ทั้งบนโต๊ะทำงานและที่โต๊ะ Browser
+  sofa: "#3b6a8f",
+  table: "#6b5220",
+};
+
+/** แผ่นรองของชิป `+n` ที่หัวโซน — สีทึบเรียบ (ห้าม glow/blur บนตัวหนังสือ และห้ามเป็น effect ตามเวลา
+ *  เพราะของที่ขยับได้สงวนไว้ให้โซน Approval เท่านั้น — spec §7.4) แค่บอกว่า "ตรงนี้กดได้" */
+const OVERFLOW_CHIP_BG = "rgba(255,255,255,.22)";
+
 /** งบ (px) ขั้นต่ำที่ต้องเหลือให้ headline ถึงจะยอมพิมพ์ต่อท้ายนาฬิกา — น้อยกว่านี้พิมพ์ไปก็ได้แค่ "…"
  *  (และห้ามปล่อยให้งบเป็น 0 เพราะ clipTextToWidth มองค่า falsy ว่า "ไม่จำกัด" แล้วข้อความจะล้นกล่อง) */
 const MIN_HEADLINE_WIDTH = 20;
@@ -49,6 +66,8 @@ const MIN_HEADLINE_WIDTH = 20;
 const LABEL_TEXT_BASELINE = 11;
 /** ชื่อท่าเดินใน manifest.character.animations — ท่าเดียวที่เล่นเป็นอนิเมชัน (spec §8.2 ตั้งชื่อไว้แบบนี้) */
 const WALK_ANIM = "walk";
+/** ท่ายืนเฉย ๆ — ท่าตกกลับเมื่อ manifest ไม่ได้บอกท่าของสถานะนั้นไว้ และท่าของคนที่ "ยืนรอ" (ดู poseFor) */
+const IDLE_ANIM = "idle";
 
 function pad2(n) {
   return String(n).padStart(2, "0");
@@ -149,16 +168,17 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
   setupCanvas();
 
   // ---- เฟอร์นิเจอร์/ของประดับต่อโซน (วาดเสมอ ไม่ขึ้นกับว่ามีคนอยู่ไหม) ----
+  // รูปทรงเวกเตอร์ชุดนี้เป็น **fallback ของโหมดที่ไม่มีผังห้องจริง** เท่านั้น (ดู drawDecorations)
   // หมายเหตุ: ห้ามมี effect ที่ขึ้นกับเวลา (พัลส์/หมุน) นอกโซน Approval (spec §7.4) — จอมอนิเตอร์นี้
   // จึงเป็นสีนิ่ง ไม่ใช่ไฟกะพริบ
   function drawDesk(cx, cy) {
     atSlot(cx, cy, () => {
-      ctx.fillStyle = "#5b4327";
+      ctx.fillStyle = VECTOR_FURNITURE_COLORS.desk;
       ctx.fillRect(-20, -30, 40, 18);
       ctx.strokeStyle = "#2c2116";
       ctx.lineWidth = 1.5;
       ctx.strokeRect(-20, -30, 40, 18);
-      ctx.fillStyle = "#111318";
+      ctx.fillStyle = VECTOR_FURNITURE_COLORS.screen;
       ctx.fillRect(-8, -40, 16, 11);
       ctx.fillStyle = "rgba(120,200,255,0.45)";
       ctx.fillRect(-6, -38, 12, 7);
@@ -166,7 +186,7 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
   }
   function drawSofa(cx, cy) {
     atSlot(cx, cy, () => {
-      ctx.fillStyle = "#3b6a8f";
+      ctx.fillStyle = VECTOR_FURNITURE_COLORS.sofa;
       roundRectPath(ctx, -18, -16, 36, 20, 6);
       ctx.fill();
       ctx.fillStyle = "#2c4f6b";
@@ -175,7 +195,7 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
   }
   function drawTable(cx, cy) {
     atSlot(cx, cy, () => {
-      ctx.fillStyle = "#6b5220";
+      ctx.fillStyle = VECTOR_FURNITURE_COLORS.table;
       ctx.beginPath();
       ctx.ellipse(0, 0, 34, 20, 0, 0, Math.PI * 2);
       ctx.fill();
@@ -186,7 +206,7 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
   }
   function drawScreenProp(cx, cy) {
     atSlot(cx, cy, () => {
-      ctx.fillStyle = "#111318";
+      ctx.fillStyle = VECTOR_FURNITURE_COLORS.screen;
       ctx.fillRect(-14, -26, 28, 20);
       ctx.fillStyle = "rgba(139,108,255,0.55)";
       ctx.fillRect(-11, -23, 22, 14);
@@ -236,7 +256,9 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
     bug: "#3a2224",
   };
 
-  /** จุดเด่นที่สุดในห้อง (spec §7.2): dais ยกพื้น + สปอตไลต์พัลส์ + วงแหวนหมุน — เฉพาะโซน Approval */
+  /** จุดเด่นที่สุดในห้อง (spec §7.2): dais ยกพื้น + สปอตไลต์พัลส์ + วงแหวนหมุน — เฉพาะโซน Approval
+   *  เอฟเฟกต์ (แสง/วงแหวน/แท่นยกพื้น) วาดทุกโหมด ส่วน "โต๊ะประชุม" เป็นเฟอร์นิเจอร์ จึงวาดเฉพาะโหมด
+   *  ที่ไม่มีผังห้องจริงเหมือนโต๊ะ/โซฟาตัวอื่น (ดูเหตุผลใน drawDecorations) */
   function drawApprovalSpotlight(now) {
     const az = zones.approval;
     const pulse = 0.5 + 0.5 * Math.sin(now / 900);
@@ -273,7 +295,7 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
       ctx.stroke();
     });
 
-    drawTable(az.center.x, az.center.y);
+    if (!mapInfo) drawTable(az.center.x, az.center.y);
   }
 
   /**
@@ -344,11 +366,24 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
     }
   }
 
+  /**
+   * ของประดับของห้อง — แบ่งเป็นสองกลุ่มตามว่า "มีของจริงใน tileset ให้ซ้อนทับไหม"
+   *
+   * 1. **เฟอร์นิเจอร์** (โต๊ะทำงาน / โซฟา / จอโต๊ะ Browser / โต๊ะประชุม) วาดเฉพาะตอน **ไม่มีผังห้องจริง**
+   *    เพราะ tileset ที่ ship มาด้วยมีโต๊ะ เก้าอี้ ตู้ ต้นไม้ครบอยู่แล้ว วาดรูปทรงเวกเตอร์ทับอีกชั้น
+   *    ได้ "โต๊ะซ้อนโต๊ะ" (ก่อนหน้านี้เลี่ยงด้วยการจัดโต๊ะจริงให้ตรงตำแหน่ง blob เวกเตอร์พอดี — ทางแก้ชั่วคราว)
+   *    เงื่อนไขคือ `mapInfo` ไม่ใช่ `assets.mode` โดยตั้งใจ: ชุด sprite ที่ไม่ประกาศ map.json ก็ได้พื้นโซน
+   *    สีทึบแบบ placeholder เหมือนกัน (drawZoneFloors ใช้ตัวแบ่งเดียวกัน) ⇒ ต้องมีเฟอร์นิเจอร์ fallback ด้วย
+   * 2. **สัญญะของสถานะโซน** (รอยแตกของโซน bug / แถบกั้นของโซน stopped) วาดทุกโหมด — มันไม่ใช่เฟอร์นิเจอร์
+   *    และไม่มี tile ไหนใน tileset สื่อความหมายนี้แทน ตัดออกเมื่อไรคือทำ cue ของสถานะหายไปเฉย ๆ
+   */
   function drawDecorations(now) {
     drawApprovalSpotlight(now); // effect ที่ขึ้นกับเวลา (พัลส์/หมุน) มีได้เฉพาะจุดนี้จุดเดียว (spec §7.4)
-    for (const s of zones.desks.slots) drawDesk(s.x, s.y);
-    for (const s of zones.lounge.slots) drawSofa(s.x, s.y);
-    drawScreenProp(zones.browser.holderSlot.x, zones.browser.holderSlot.y);
+    if (!mapInfo) {
+      for (const s of zones.desks.slots) drawDesk(s.x, s.y);
+      for (const s of zones.lounge.slots) drawSofa(s.x, s.y);
+      drawScreenProp(zones.browser.holderSlot.x, zones.browser.holderSlot.y);
+    }
     drawCracks(zones.bug.rect);
     drawBarrier(zones.stopped.rect);
   }
@@ -472,13 +507,19 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
    * ท่า (spec §7.4): กำลังย้ายโซน → `walk` เล่นวนตาม `frames`/`fps` ของ manifest และเลือกแถวจาก
    * ทิศการเคลื่อนที่ · อยู่นิ่ง → ท่าตาม `manifest.states[state].anim` **ตรึงเฟรมเดียว** โดยตั้งใจ
    * เพราะท่าอยู่นิ่งของ LPC ไม่ใช่ลูปเดิน (`sit.png` 3 "เฟรม" คือ 3 ท่านั่งคนละท่า เล่นวนแล้วจะกระตุก)
+   * **เฟรมไหน** เป็นเรื่องของชุด asset (`states.<state>.frame`) ไม่ใช่ 0 เสมอ — ดู restFrameIndex()
    */
   function drawSpriteFrame(item, dir) {
     const { manifest, folders } = assets; // ตัวชีตเองหยิบผ่าน resolveAnim()
     const meta = item.meta;
     const folder = folders[pickCharacterFolder(meta.id, folders.length)];
+    // ทุกตัวในโซน Browser **ยืน** ไม่ใช่นั่ง ทั้งที่ state ของมันเป็น working (P3/P4 มาก่อน P5/P6 แต่
+    // ไม่ได้เปลี่ยน state) — โซนนั้นไม่มีที่นั่งให้จริง: ผู้ถือนั่งเก้าอี้ไม่ได้เพราะป้ายจะไปทับหัวคิว
+    // (เหตุผลเต็มอยู่ที่ browser.holderSlot ใน layout.js) ส่วนช่องคิวมีเก้าอี้ไม่ครบทุกช่อง ถ้าใช้ท่านั่ง
+    // ตาม state ช่องที่ไม่มีเก้าอี้จะกลายเป็น "นั่งกลางอากาศ" ทันที
+    const pose = meta.zone === "browser" ? { anim: IDLE_ANIM } : manifest.states?.[meta.state];
     const walking = item.moving ? resolveAnim(folder, WALK_ANIM) : null;
-    const anim = walking || resolveAnim(folder, manifest.states?.[meta.state]?.anim || "idle");
+    const anim = walking || resolveAnim(folder, pose?.anim || IDLE_ANIM);
     if (!anim) return; // ป้องกัน crash ถ้า manifest อ้างถึงไฟล์ที่โหลดไม่สำเร็จ
 
     const chr = manifest.character;
@@ -488,7 +529,9 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
     const anchor = chr.anchor || [];
     const anchorX = Number.isFinite(anchor[0]) ? anchor[0] : fw / 2;
     const anchorY = Number.isFinite(anchor[1]) ? anchor[1] : fh - 2;
-    const frameIndex = walking ? animationFrameIndex(item.animMs, anim.def.frames, anim.def.fps) : 0;
+    const frameIndex = walking
+      ? animationFrameIndex(item.animMs, anim.def.frames, anim.def.fps)
+      : restFrameIndex(pose, anim.def.frames);
     ctx.drawImage(
       anim.img,
       offX + frameIndex * fw,
@@ -542,8 +585,12 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
   /**
    * ป้ายที่ตำแหน่งตายตัว (หัวโซน / FIFO / ผู้ถือ Browser / auto-pause) — วาดจาก spec ของ layout.js
    * `spec.w` คือความกว้างสูงสุด; แผ่นรองย่อตามข้อความจริงแต่ไม่มีวันเกิน ⇒ อยู่ในกรอบโซนเสมอ
+   *
+   * @param {string|null} [chipBg] สีแผ่นรองของส่วน `suffix` — ใส่เมื่อ suffix เป็นของที่ "กดได้" (ชิป +n)
+   * @returns {{plate:object, chip:object|null}} กล่องที่ **วาดจริง** (ไม่ใช่กล่องความกว้างสูงสุดของ spec)
+   *   `chip` = กล่องของ suffix ใช้เป็นพื้นที่คลิก ⇒ กรอบคลิกตรงกับสิ่งที่ตาเห็นเสมอ
    */
-  function drawFixedLabel(spec, lines, bg) {
+  function drawFixedLabel(spec, lines, bg, chipBg = null) {
     const budget = spec.w - LABEL_PLATE_PAD_X * 2;
     let widest = 0;
     const prepared = lines.map((line) => {
@@ -557,13 +604,19 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
       const text = clipTextToWidth(ctx, line.text, head) + suffix;
       const w = Math.min(budget, ctx.measureText(text).width);
       if (w > widest) widest = w;
-      return { ...line, text };
+      return { ...line, text, width: w, suffixWidth: suffix ? ctx.measureText(suffix).width : 0 };
     });
     const plateW = Math.min(spec.w, widest + LABEL_PLATE_PAD_X * 2);
-    drawPlate(
-      { x1: spec.cx - plateW / 2, y1: spec.top, x2: spec.cx + plateW / 2, y2: spec.top + spec.h },
-      bg,
-    );
+    const plate = { x1: spec.cx - plateW / 2, y1: spec.top, x2: spec.cx + plateW / 2, y2: spec.top + spec.h };
+    drawPlate(plate, bg);
+    // แผ่นรองของชิปต้องวาดก่อนตัวหนังสือ (ไม่งั้นต้องทับตัวหนังสือด้วยสีโปร่งซึ่งอ่านยากขึ้น)
+    let chip = null;
+    prepared.forEach((line, i) => {
+      if (!line.suffixWidth) return;
+      const y1 = spec.top + i * LABEL_LINE_H;
+      chip = { x1: spec.cx + line.width / 2 - line.suffixWidth, y1, x2: spec.cx + line.width / 2, y2: y1 + LABEL_PLATE_H };
+      if (chipBg) drawPlate(chip, chipBg);
+    });
     // ตัดข้อความไปแล้วข้างบน (พร้อมกันที่ให้ suffix) — **ห้ามตัดซ้ำ** ไม่งั้นรอบสองจะกินจากท้าย
     // ซึ่งคือ suffix ที่เพิ่งอุตส่าห์กันไว้ · `maxWidth` ของ fillText ยังเป็นตาข่ายชั้นสุดท้ายอยู่
     ctx.textAlign = "center";
@@ -572,18 +625,25 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
       ctx.fillStyle = line.fg;
       ctx.fillText(line.text, spec.cx, spec.top + i * LABEL_LINE_H + LABEL_TEXT_BASELINE, budget);
     });
+    return { plate, chip };
   }
 
   /**
    * ป้ายหัวโซน — ต่อท้ายด้วย `+n` เมื่อโซนนั้นมีตัวละครมากกว่าที่นั่งที่ใส่ป้ายได้ (spec §7.2)
    * ยัดป้ายเพิ่มจนล้นโซนคือสิ่งที่ทำให้ห้องถูกบังทั้งห้องมาแล้ว — จำนวนที่เหลือบอกที่หัวโซนแทน
+   *
+   * `+n` เป็น **ชิปที่กดได้**: มีแผ่นรองของตัวเองให้เห็นว่ากดได้ และคืน hitbox ออกไปให้ main.js
+   * เปิดรายชื่อตัวที่ซ่อนอยู่ — ตัวพวกนั้นยืนซ้อนกันที่นั่งสุดท้ายจนคลิกทีละตัวไม่ได้ (spec §7.5
+   * บอกว่าชื่อเต็มดูได้จากการคลิก ⇒ ต้องมีทางเข้าถึงทุกตัว ไม่ใช่แค่ตัวที่บังเอิญอยู่บนสุด)
+   * @returns {object[]} hitbox ของชิป `+n` (โซนที่ไม่ล้นไม่มี)
    */
   function drawZoneLabels(overflowByZone) {
+    const hitboxes = [];
     for (const id of ZONE_IDS) {
       const z = zones[id];
       const isApproval = id === "approval";
       const extra = overflowByZone[id] || 0;
-      drawFixedLabel(
+      const { chip } = drawFixedLabel(
         labels.zoneHeader[id],
         [
           {
@@ -599,13 +659,18 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
             : null,
         ].filter(Boolean),
         isApproval ? "rgba(74,58,18,.78)" : "rgba(0,0,0,.6)",
+        extra > 0 ? OVERFLOW_CHIP_BG : null,
       );
+      if (extra > 0 && chip) {
+        hitboxes.push({ kind: "overflow", id, x1: chip.x1 - 2, y1: chip.y1 - 2, x2: chip.x2 + 2, y2: chip.y2 + 2 });
+      }
     }
     drawFixedLabel(
       labels.browserNote,
       [{ text: "FIFO: มาก่อนได้ก่อน", font: "10px sans-serif", fg: "rgba(255,255,255,.85)" }],
       "rgba(0,0,0,.5)",
     );
+    return hitboxes;
   }
 
   /** โต๊ะ Browser แสดงป้ายชื่อผู้ถือเสมอ แม้ตัวถือจะไปยืนที่โซน Approval (P2 > P3 — spec §7.3) */
@@ -672,7 +737,12 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
       if (item.meta.overflow) continue; // ล้นที่นั่งของโซน — นับรวมเป็น +n ที่หัวโซนแทน
       // clamp ใช้ได้จริงเฉพาะช่วงเดินเข้า/ออกทางประตู (ประตูอยู่ติดผนังล่าง ป้ายจะตกใต้ canvas ทั้งใบ)
       // — กับที่นั่งทุกที่มันเป็น no-op เพราะป้ายอยู่ในโซนตั้งแต่แรก (ยืนยันไว้ใน layout.test.js)
-      const box = clampBoxInto(characterLabelBox(item.x, item.y, tilePx), ROOM_LABEL_BOUNDS);
+      // `labelAbove` มาจากที่นั่งปลายทาง (state.js) ไม่ใช่คำนวณจาก item.y สด ๆ — ไม่งั้นป้ายจะเด้ง
+      // สลับบน/ล่างกลางทางที่ตัวละครเดินเข้าที่นั่งแถวล่างสุด
+      const box = clampBoxInto(
+        characterLabelBox(item.x, item.y, tilePx, item.labelAbove),
+        ROOM_LABEL_BOUNDS,
+      );
       const cx = (box.x1 + box.x2) / 2;
       const budget = box.x2 - box.x1 - LABEL_PLATE_PAD_X * 2;
       const clock = getClockInfo(item.meta, hostNowMs);
@@ -708,7 +778,7 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
   }
 
   /**
-   * วาดหนึ่งเฟรมเต็ม แล้วคืน hitbox สำหรับ click (ตัวละคร + ป้าย auto-pause)
+   * วาดหนึ่งเฟรมเต็ม แล้วคืน hitbox สำหรับ click (ตัวละคร + ป้าย auto-pause + ชิป `+n` ที่หัวโซน)
    * @param {ReturnType<import("./state.js").createRoomState>["getDrawList"]} drawList จาก state.getDrawList(now)
    * @param {number} hostNowMs เวลา host โดยประมาณ — ใช้คำนวณนาฬิกา (spec §5.6)
    * @param {{holder:string|null}} browserQueue
@@ -728,9 +798,19 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
     ctx.strokeRect(3, 3, W - 6, H - 6);
 
     const withSelection = drawList.map((item) => ({ ...item, selected: item.id === selectedId }));
+    // ตัวที่ล้นที่นั่ง (`meta.overflow`) ยืนซ้อนที่นั่งสุดท้าย **พิกัดเดียวกันเป๊ะ** กับเจ้าของที่นั่ง ⇒ ต้องวาดไว้
+    // ใต้เสมอ ไม่งั้นสไปรต์/เลขคิวของตัวที่ไม่มีป้ายจะไปอยู่บนสุด แล้วถูกอ่านคู่กับป้ายของอีกคนเป็นข้อมูลผิด
+    // (เห็นชัดสุดที่คิว Browser: เลขคิวบนหัวเป็นของตัวที่ล้น แต่ชื่อใต้เท้าเป็นของเจ้าของช่อง)
+    const painterOrder = [...withSelection].sort(
+      (a, b) => a.y - b.y || Number(Boolean(b.meta.overflow)) - Number(Boolean(a.meta.overflow)),
+    );
     const hitboxes = [];
-    for (const item of withSelection) {
+    for (const item of painterOrder) {
       drawCharacterSprite(item);
+      // ตัวที่ล้นที่นั่งไม่มีกรอบคลิกของตัวเอง: มันซ้อนพิกัดเดียวกันหมด กรอบจะทับกันเป็นตั้งแล้ว
+      // findHit คืนได้ตัวเดียวอยู่ดี (ตัวที่เหลือกลายเป็นตัวละครที่ไม่มีวันเปิดดูได้) — พวกนี้เข้าถึง
+      // ผ่านชิป `+n` ที่หัวโซนแทน ⇒ "ที่นั่งหนึ่งกรอบคลิกหนึ่ง" และทุกตัวในห้องมีทางเข้าถึงเสมอ
+      if (item.meta.overflow) continue;
       // กรอบคลิกล้อมตัวสไปรต์ ⇒ ต้องโตด้วย `zoom` เท่ากับตัวสไปรต์ ไม่งั้นห้องขยายแล้วคลิกไม่โดน
       hitboxes.push({
         kind: "character",
@@ -751,15 +831,20 @@ export function createRenderer({ canvas, zones, assets, roomSize, tilePx: tilePx
 
     // ป้ายชื่อ (โซน + ตัวละคร) เป็น pass สุดท้ายเสมอ กันตัวละครแถวแรกบัง (spec §7.2)
     // ตัวที่ล้นที่นั่งของโซนไม่ได้ป้าย แต่ถูกนับเป็น +n ที่หัวโซน (ต้องนับก่อนวาดหัวโซน)
+    // นับจาก overflowGroups() ตัวเดียวกับที่การ์ด "+n" ใช้ลิสต์รายชื่อ ⇒ ตัวเลขกับรายชื่อ drift กันไม่ได้
     const overflowByZone = {};
-    for (const item of withSelection) {
-      if (!item.meta.overflow) continue;
-      overflowByZone[item.meta.zone] = (overflowByZone[item.meta.zone] || 0) + 1;
+    for (const [zone, list] of Object.entries(overflowGroups(withSelection))) {
+      overflowByZone[zone] = list.length;
     }
-    drawZoneLabels(overflowByZone);
+    const overflowHitboxes = drawZoneLabels(overflowByZone);
     drawCharacterLabels(withSelection, hostNowMs);
 
-    return [...hitboxes, ...scheduleHitboxes];
+    // findHit ไล่จากท้ายมาหน้า ⇒ ของที่อยู่ท้ายสุดชนะเมื่อกรอบเหลื่อมกัน · **ชิป `+n` ต้องอยู่ท้ายสุด**
+    // เพราะกรอบคลิกของตัวละครสูงเลยหัวขึ้นไป ~36px (เป็นที่ว่างในเฟรม 64px ไม่ใช่ตัวงานศิลป์) แล้วมันไป
+    // คร่อมแถบหัวโซนพอดี — วัดในเบราว์เซอร์จริงที่โซน desks: ตอนตัวละครชนะ ชิปเหลือช่องคลิกแค่ ~3px
+    // ซึ่งเท่ากับตัวที่ซ่อนอยู่กลับไปเปิดไม่ได้อีก · ที่ยอมให้ชิปชนะเพราะแถบชิปสูงแค่ ~19px ที่ขอบบนสุด
+    // ของโซน ส่วนงานศิลป์ของตัวละครแถวบนสุดเริ่มต่ำกว่านั้นลงมามาก ⇒ ชิปกินได้แค่ "อากาศเหนือหัว"
+    return [...hitboxes, ...scheduleHitboxes, ...overflowHitboxes];
   }
 
   return { draw, W, H };

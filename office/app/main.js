@@ -17,7 +17,7 @@ import {
   zoneRectsFromMap,
   chooseTilePx,
 } from "./layout.js";
-import { createRoomState } from "./state.js";
+import { createRoomState, overflowGroups } from "./state.js";
 import { loadAssets, placeholderAssets } from "./assets.js";
 import { createRenderer, getClockInfo } from "./render.js";
 
@@ -46,8 +46,13 @@ let tilePx = 0;
 let lastDpr = 0;
 let latestSnapshot = null;
 let currentHitboxes = [];
+/** drawList ของเฟรมล่าสุด — การ์ด `+n` ต้องอ่านจากก้อนเดียวกับที่ห้องวาดจริง ไม่ใช่คำนวณเองอีกชุด */
+let latestDrawList = [];
 let selectedId = null;
-let selectedKind = null; // "character" | "schedule"
+/** "character" | "schedule" | "overflow" (id ของ overflow คือ zone id ไม่ใช่ id ตัวละคร) */
+let selectedKind = null;
+/** โซนที่ผู้ใช้กดชิป `+n` มาก่อนหน้า — มีค่าเมื่อการ์ดตัวละครถูกเปิดจากรายชื่อนั้น (ไว้ทำปุ่มย้อนกลับ) */
+let overflowOrigin = null;
 
 function setConnected(ok) {
   overlayEl.hidden = ok;
@@ -201,6 +206,7 @@ function loop(t) {
   const now = Date.now();
   const hostNow = room.estimateHostNow(now);
   const drawList = room.getDrawList(now);
+  latestDrawList = drawList;
   currentHitboxes = renderer.draw(
     drawList,
     hostNow,
@@ -242,7 +248,28 @@ canvas.addEventListener("click", (evt) => {
   }
   selectedId = hit.id;
   selectedKind = hit.kind;
+  overflowOrigin = null; // คลิกจากในห้องตรง ๆ = ไม่ได้มาจากรายชื่อ +n
   refreshInfoCard();
+});
+
+// ปุ่มในการ์ดเป็นแค่การ "เปลี่ยนสิ่งที่กำลังดู" ในหน้านี้เท่านั้น — ไม่มี fetch ไม่มี form ไม่สั่งงานอะไร
+// ทั้งสิ้น (ADR 0002) · ใช้ event delegation เพราะเนื้อการ์ดถูกเขียนใหม่ทุก snapshot
+cardBodyEl.addEventListener("click", (evt) => {
+  const pick = evt.target.closest("[data-pick]");
+  if (pick) {
+    if (selectedKind === "overflow") overflowOrigin = selectedId;
+    selectedId = pick.dataset.pick;
+    selectedKind = "character";
+    refreshInfoCard();
+    return;
+  }
+  const back = evt.target.closest("[data-back]");
+  if (back) {
+    selectedId = back.dataset.back;
+    selectedKind = "overflow";
+    overflowOrigin = null;
+    refreshInfoCard();
+  }
 });
 
 function findCharacter(id) {
@@ -283,7 +310,38 @@ function fmtEpoch(ms) {
   return new Date(ms).toLocaleString("th-TH");
 }
 
+/**
+ * การ์ดของชิป `+n`: รายชื่อตัวที่ไม่มีที่นั่งในโซนนั้น กดต่อเพื่อดูรายละเอียดรายตัว
+ *
+ * นี่คือทางเข้าถึงเดียวของตัวละครกลุ่มนี้ (มันยืนซ้อนกันที่นั่งสุดท้ายจนคลิกแยกไม่ได้ — ดู render.js)
+ * ⇒ ต้อง list จาก drawList ก้อนเดียวกับที่ห้องเพิ่งวาด ไม่งั้นจำนวนบนหัวโซนกับรายชื่อในการ์ดไม่ตรงกัน
+ */
+function refreshOverflowCard(zoneId) {
+  const list = overflowGroups(latestDrawList)[zoneId] || [];
+  if (!list.length) return hideInfoCard(); // คิวสั้นลงจนไม่มีใครล้นแล้ว — ปิดไปเลยดีกว่าค้างการ์ดเปล่า
+  const zone = zones?.[zoneId];
+  const hostNow = room.estimateHostNow(Date.now());
+  const rows = list
+    .map((meta) => {
+      const sm = STATE_LABEL[meta.state] || { text: meta.state, icon: "•", color: "#888" };
+      const clock = getClockInfo(meta, hostNow);
+      const role = meta.queuePos ? `คิวที่ ${meta.queuePos}` : sm.text;
+      return `<button class="overflow-item" type="button" data-pick="${escapeHtml(meta.id)}">
+        <span class="overflow-name">${escapeHtml(meta.name)}</span>
+        <span class="overflow-sub">${sm.icon} ${escapeHtml(role)} · ${clock.countdown ? "⏳ เหลือ " : "⏱ "}${clock.text}</span>
+      </button>`;
+    })
+    .join("");
+  cardBodyEl.innerHTML = `
+    <div class="row"><span>โซน</span><span>${escapeHtml(`${zone?.icon ?? ""} ${zone?.label ?? zoneId}`)}</span></div>
+    <div class="legend-note">อีก ${list.length} ตัวที่ไม่มีที่นั่งในโซนนี้ (ยืนซ้อนกันอยู่ที่ช่องสุดท้าย) — กดชื่อเพื่อดูรายละเอียด</div>
+    ${rows}
+  `;
+  infocardEl.hidden = false;
+}
+
 function refreshInfoCard() {
+  if (selectedKind === "overflow") return refreshOverflowCard(selectedId);
   if (selectedKind === "schedule") {
     const s = findSchedule(selectedId);
     if (!s) return hideInfoCard();
@@ -326,7 +384,13 @@ function refreshInfoCard() {
        <div class="row"><span>จบเมื่อ</span><span>${fmtEpoch(char.outcome.endedAt)}</span></div>`
     : "";
 
+  // มาจากรายชื่อของชิป +n → มีทางกลับไปรายชื่อนั้น (ไม่งั้นต้องไปกดชิปใหม่ทุกครั้งที่ดูทีละตัว)
+  const backHtml = overflowOrigin
+    ? `<button class="overflow-back" type="button" data-back="${escapeHtml(overflowOrigin)}">← กลับไปรายชื่อที่ไม่มีที่นั่ง</button>`
+    : "";
+
   cardBodyEl.innerHTML = `
+    ${backHtml}
     <div class="row"><span>ชื่อ</span><span>${escapeHtml(char.name)}</span></div>
     <div class="row"><span>ประเภท</span><span>${kindLabel}</span></div>
     <div class="row"><span>สถานะ</span>
@@ -351,6 +415,7 @@ function refreshInfoCard() {
 function hideInfoCard() {
   selectedId = null;
   selectedKind = null;
+  overflowOrigin = null;
   infocardEl.hidden = true;
 }
 

@@ -23,7 +23,7 @@
   },
   "states": {
     "idle": { "zone": "lounge", "anim": "idle" },
-    "working": { "zone": "desks", "anim": "sit" },
+    "working": { "zone": "desks", "anim": "sit", "frame": 2 },
     "approval": { "zone": "approval", "anim": "idle" },
     "failed": { "zone": "bug", "anim": "sleep" },
     "stopped": { "zone": "stopped", "anim": "idle" }

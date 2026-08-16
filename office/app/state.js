@@ -86,6 +86,32 @@ function assignSlots(prevAssignment, idsInZone, slotCount) {
 }
 
 /**
+ * ตัวละครที่ "ล้นที่นั่ง" ของแต่ละโซน แยกเป็นกลุ่มตามโซน (โซนที่ไม่ล้นไม่มีคีย์เลย)
+ *
+ * เป็น **แหล่งเดียว** ของทั้งสองที่ที่พูดถึงคนกลุ่มนี้: ตัวเลข `+n` ที่หัวโซน (render.js) กับรายชื่อ
+ * ในการ์ดตอนคลิกชิปนั้น (main.js) — คำนวณคนละที่เมื่อไรจำนวนกับรายชื่อ drift กันได้ทันที
+ * เรียงตามลำดับคิวก่อน (โซน Browser) แล้วค่อยตาม id เพื่อให้รายการนิ่ง ไม่สลับตำแหน่งทุกเฟรม
+ * @param {{meta:object}[]} drawList ผลของ getDrawList()
+ * @returns {Record<string, object[]>} zoneId -> meta ของตัวที่ไม่มีที่นั่ง
+ */
+export function overflowGroups(drawList) {
+  const groups = {};
+  for (const item of drawList || []) {
+    const meta = item?.meta;
+    if (!meta?.overflow) continue;
+    (groups[meta.zone] ||= []).push(meta);
+  }
+  for (const list of Object.values(groups)) {
+    list.sort(
+      (a, b) =>
+        (a.queuePos ?? Number.MAX_SAFE_INTEGER) - (b.queuePos ?? Number.MAX_SAFE_INTEGER) ||
+        (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+    );
+  }
+  return groups;
+}
+
+/**
  * สร้างสถานะห้องหนึ่งชุด (position cache + slot memory) ผูกกับ zones ที่กำหนด
  * @param {ReturnType<import("./layout.js").buildZones>} zones
  * @param {{tilePx?:number, door?:{x:number,y:number,dir?:string}}} [options]
@@ -162,6 +188,9 @@ export function createRoomState(zones, options = {}) {
   function placeEntity(char, slot, zoneRole, now, overflow = false) {
     const target = worldPos(slot, tilePx);
     const meta = buildMeta(char, zoneRole, overflow);
+    // ที่นั่งบางที่ (แถวเก้าอี้ล่างสุดของโซน desks) ไม่เหลือที่ใต้เท้าให้ป้าย → ป้ายไปอยู่เหนือหัวแทน
+    // ธงมาจาก slot ปลายทางเสมอ ⇒ ระหว่างเดินเข้าที่นั่งป้ายก็อยู่ฝั่งเดิมตลอด ไม่เด้งสลับกลางทาง
+    const labelAbove = !!slot.labelAbove;
     let cache = posCache.get(char.id);
     if (!cache) {
       // เกิด: เดินเข้ามาจากประตูเสมอ (spec §7.4) ไม่ใช่ fade-in อยู่กับที่
@@ -177,6 +206,7 @@ export function createRoomState(zones, options = {}) {
         spawning: true,
         despawning: false,
         despawnT0: 0,
+        labelAbove,
         meta,
       };
       posCache.set(char.id, cache);
@@ -184,6 +214,7 @@ export function createRoomState(zones, options = {}) {
     }
     cache.despawning = false;
     cache.meta = meta;
+    cache.labelAbove = labelAbove;
     cache.dir = slot.dir || cache.dir;
     if (cache.to.x !== target.x || cache.to.y !== target.y) {
       glideTo(cache, target, now);
@@ -280,6 +311,8 @@ export function createRoomState(zones, options = {}) {
         // อยู่นิ่ง = ท่าตาม manifest.states เฟรมเดียว) — เวลานับจากจุดเริ่ม leg ปัจจุบัน
         moving,
         animMs: Math.max(0, now - cache.t0),
+        // ป้ายของที่นั่งนี้อยู่เหนือหัวแทนใต้เท้าไหม (ธงของ slot ปลายทาง — ดู placeEntity)
+        labelAbove: !!cache.labelAbove,
         meta: cache.meta,
       });
     }

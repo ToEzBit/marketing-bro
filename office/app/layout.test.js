@@ -17,6 +17,7 @@ import {
   doorSlotFor,
   directionFromVector,
   animationFrameIndex,
+  restFrameIndex,
   boxesOverlap,
   boxInside,
   slotLabelBox,
@@ -32,11 +33,20 @@ import {
   CHAR_LABEL_W_TILES,
   CHAR_LABEL_H,
   CHAR_LABEL_TOP_OFFSET,
+  CHAR_SPRITE_TILES,
+  CHAR_HEAD_TOP_TILES,
+  CHAR_BODY_HALF_W_TILES,
+  CHAIR_SEAT_Y,
+  DESK_CHAIR_ROW,
+  DESK_ROW_PITCH,
+  labelAboveFor,
+  slotHeadTop,
   DEFAULT_ZONE_RECTS,
   ZONE_IDS,
   DOOR_SLOT,
   ROOM,
   TILE,
+  ANCHOR,
 } from "./layout.js";
 import { tilePxOf, PLACEHOLDER_TILE_SIZE } from "./assets.js";
 
@@ -322,6 +332,33 @@ check("animationFrameIndex วนลูปตาม frames/fps ของ manifes
   assert.equal(animationFrameIndex(1000, 2, 3), 1); // 3 เฟรมผ่านไป → 3 % 2
 });
 
+check("restFrameIndex: ไม่ระบุ frame ใน manifest = เฟรม 0 (พฤติกรรมเดิมของทุกชุด asset)", () => {
+  assert.equal(restFrameIndex(undefined, 3), 0);
+  assert.equal(restFrameIndex({}, 3), 0);
+  assert.equal(restFrameIndex({ anim: "sit" }, 3), 0);
+});
+
+check("restFrameIndex: ชุด default บอกให้ working ใช้เฟรมนั่งเก้าอี้ (ไม่ใช่นั่งกับพื้น) — บั๊กภาพ #20", () => {
+  const manifest = JSON.parse(readFileSync(new URL("../assets/default/manifest.json", import.meta.url), "utf8"));
+  const sit = manifest.character.animations.sit;
+  assert.equal(manifest.states.working.anim, "sit");
+  assert.equal(restFrameIndex(manifest.states.working, sit.frames), 2, "ท่านั่งเก้าอี้คือเฟรม 2 ของ sit.png");
+  // สถานะที่เหลือยังเป็นเฟรม 0 — failed ใช้ sleep→sit เฟรม 0 (ท่าทรุดกับพื้น) โดยตั้งใจ
+  for (const id of ["idle", "approval", "failed", "stopped"]) {
+    assert.equal(restFrameIndex(manifest.states[id], sit.frames), 0, `states.${id} ต้องยังเป็นเฟรม 0`);
+  }
+});
+
+check("restFrameIndex หนีบค่าไม่ให้อ่านเลยชีต (ชุด asset ที่ sit มีเฟรมเดียวต้องไม่วาดพัง — §8.2)", () => {
+  assert.equal(restFrameIndex({ frame: 2 }, 1), 0);
+  assert.equal(restFrameIndex({ frame: 9 }, 3), 2);
+  for (const bad of [undefined, 0, -1, NaN, "x", null]) {
+    assert.equal(restFrameIndex({ frame: 2 }, bad), 0, `frameCount=${bad}`);
+    assert.equal(restFrameIndex({ frame: bad }, 3), 0, `frame=${bad}`);
+  }
+  assert.equal(restFrameIndex({ frame: 1.9 }, 3), 1); // ปัดลงเป็นจำนวนเต็ม
+});
+
 check("animationFrameIndex คืน 0 อย่างปลอดภัยเมื่อ manifest ไม่ได้บอก frames/fps มา", () => {
   for (const [frames, fps] of [[1, 12], [0, 12], [undefined, 12], [9, 0], [9, undefined], [9, -3]]) {
     assert.equal(animationFrameIndex(500, frames, fps), 0, `frames=${frames} fps=${fps}`);
@@ -365,6 +402,93 @@ check("กล่องป้ายมีขนาดตายตัว ไม่
   assert.equal(b.y1, 300 + CHAR_LABEL_TOP_OFFSET, "อยู่ใต้เท้าตัวละคร");
   // ความกว้างสเกลตาม tile ⇒ ห้องที่ tile ใหญ่ขึ้น ป้ายก็ใหญ่ตามสัดส่วนเดิม
   assert.equal(characterLabelBox(0, 0, 64).x2 - characterLabelBox(0, 0, 64).x1, CHAR_LABEL_W_TILES * 64);
+});
+
+console.log("\nป้ายที่พลิกไปอยู่เหนือหัว (ที่นั่งที่ใต้เท้าไม่เหลือที่ให้ป้าย — #20)");
+
+check("characterLabelBox(above) วางป้ายไว้เหนือหัว ขนาดเท่าเดิมเป๊ะ และยังกึ่งกลางตัวละคร", () => {
+  const below = characterLabelBox(200, 300, 32);
+  const above = characterLabelBox(200, 300, 32, true);
+  assert.equal(above.x2 - above.x1, below.x2 - below.x1, "กว้างเท่าเดิม");
+  assert.equal(above.y2 - above.y1, below.y2 - below.y1, "สูงเท่าเดิม");
+  assert.equal((above.x1 + above.x2) / 2, 200);
+  assert.ok(above.y2 < 300 - CHAR_SPRITE_TILES * 32 + 1, "ขอบล่างต้องอยู่เหนือหัว ไม่ใช่กลางตัว");
+});
+
+check("★ พลิกเฉพาะที่นั่งที่จำเป็นจริง — ที่เหลือทั้งห้องยังอยู่ใต้เท้าเหมือนเดิม", () => {
+  const flipped = [];
+  for (const id of ZONE_IDS) {
+    zones[id].slots.forEach((s, i) => {
+      if (s.labelAbove) flipped.push(`${id}#${i}`);
+    });
+  }
+  // มีที่เดียวในห้องที่ป้ายใต้เท้าลงไม่ได้จริง ๆ คือแถวเก้าอี้ล่างสุดของ desks (ห่างก้นโซน 0.2 tile)
+  assert.deepEqual(flipped, ["desks#4", "desks#5"]);
+  // และต้องพลิกเพราะ "ไม่มีทางเลือก" จริง ๆ ไม่ใช่เพราะความชอบ — ที่ tilePx ไหนก็ยังต้องพลิก
+  for (const [id, idx] of [["desks", 4], ["desks", 5]]) {
+    for (const tilePx of [32, 48, 64, 128]) {
+      assert.ok(
+        labelAboveFor(zones[id], zones[id].slots[idx], tilePx),
+        `${id} ที่นั่ง ${idx}: ป้ายใต้เท้าลงได้ที่ tilePx=${tilePx} ⇒ ไม่ควรพลิก`,
+      );
+    }
+  }
+});
+
+check("★ ไม่มีป้ายใบไหนในห้องไปคลุม 'หัว' ของตัวละครตัวอื่น (กติกาที่ตัดสินผังของ 3 โซน — #20)", () => {
+  // นี่คือเกณฑ์ที่ทำให้ต้องพลิกป้าย และเป็นเกณฑ์ที่บอกว่าโซน Browser ให้ผู้ถือนั่งเก้าอี้ไม่ได้
+  // ตรวจทุก tilePx ที่ chooseTilePx เลือกจริง เพราะกล่องป้ายสูงเป็น px ตายตัวแต่ตัวละครโตตาม tile
+  const chosen = new Set([TILE]);
+  for (let w = 600; w <= 4000; w += 37) chosen.add(chooseTilePx({ availW: w, availH: 2200 }));
+  for (const tilePx of chosen) {
+    for (const id of ZONE_IDS) {
+      const slots = zones[id].slots;
+      slots.forEach((slot, i) => {
+        const box = slotLabelBox(slot, tilePx);
+        slots.forEach((other, j) => {
+          if (i === j) return;
+          const half = CHAR_BODY_HALF_W_TILES * tilePx;
+          const covers =
+            box.y2 > slotHeadTop(other, tilePx) &&
+            box.y1 < other.y * tilePx &&
+            box.x1 < other.x * tilePx + half &&
+            box.x2 > other.x * tilePx - half;
+          assert.equal(covers, false, `tilePx=${tilePx} โซน ${id}: ป้ายของที่นั่ง ${i} คลุมหัวที่นั่ง ${j}`);
+        });
+      });
+    }
+  }
+});
+
+check("★ การตัดสินว่าพลิกหรือไม่ ไม่ขึ้นกับขนาดจอ (ป้ายห้ามเด้งสลับบน/ล่างตอนย่อ-ขยายหน้าต่าง)", () => {
+  const flags = zones.desks.slots.map((s) => !!s.labelAbove);
+  for (const availW of [700, 1000, 1546, 2186, 2560, 3800]) {
+    const tilePx = chooseTilePx({ availW, availH: 2200 });
+    const rebuilt = buildZones();
+    assert.deepEqual(rebuilt.desks.slots.map((s) => !!s.labelAbove), flags, `tilePx=${tilePx}`);
+  }
+});
+
+check("★ ป้ายที่พลิกขึ้นบนต้องไม่ทับป้ายของแถวเหนือมัน และไม่ทับหัวโซน", () => {
+  for (const tilePx of [32, 38, 48, 64]) {
+    const boxes = zones.desks.slots.map((s) => slotLabelBox(s, tilePx));
+    const area = zoneLabelArea(zones.desks, tilePx);
+    for (const b of boxes) assert.ok(b.y1 >= area.y1, `tilePx=${tilePx}: ป้ายล้ำหัวโซน`);
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        assert.equal(boxesOverlap(boxes[i], boxes[j]), false, `tilePx=${tilePx}: ป้าย ${i} กับ ${j} ทับกัน`);
+      }
+    }
+  }
+});
+
+check("★ ป้ายที่พลิกขึ้นบนต้องอยู่เหนือ 'หัว' ของเจ้าของป้ายจริง ๆ ไม่ใช่ทับตัวมันเอง", () => {
+  for (const tilePx of [32, 48, 64]) {
+    for (const slot of zones.desks.slots.filter((s) => s.labelAbove)) {
+      const headTop = slot.y * tilePx - (CHAR_SPRITE_TILES - CHAR_HEAD_TOP_TILES) * tilePx;
+      assert.ok(slotLabelBox(slot, tilePx).y2 <= headTop, `tilePx=${tilePx}: ป้ายทับหัวเจ้าของเอง`);
+    }
+  }
 });
 
 check("★ ป้ายของ *ทุกที่นั่ง* ใน *ทุกโซน* อยู่ในกรอบโซนของตัวเอง (เกณฑ์หลักของ #20)", () => {
@@ -520,6 +644,32 @@ check("desks เป็น grid 2×3 = 6 ที่นั่ง", () => {
   assert.equal(zones.desks.slots.length, 6);
 });
 
+check("★ ที่นั่งโซน desks ลงบน 'เก้าอี้จริง' ของผังห้องทุกตัว ไม่ใช่ลอยอยู่บนโต๊ะ (บั๊กภาพ #20)", () => {
+  // เก้าอี้ใน map.json ของชุด default อยู่ที่ tile (18,3) (21,3) (18,8) (21,8) (18,13) (21,13)
+  // ⇒ ที่นั่งต้องอยู่กลาง tile ตามแนวนอน และอยู่ที่ CHAIR_SEAT_Y ของแถวเก้าอี้ตามแนวตั้ง
+  const [rx, ry] = zones.desks.rect;
+  const chairRows = [0, 1, 2].map((i) => ry + DESK_CHAIR_ROW + i * DESK_ROW_PITCH);
+  assert.deepEqual(chairRows, [3, 8, 13], "แถวเก้าอี้ต้องตรงกับ map.json ของชุด default");
+  for (const [i, slot] of zones.desks.slots.entries()) {
+    const row = chairRows[Math.floor(i / 2)];
+    assert.ok(
+      Math.abs(slot.y - (row + CHAIR_SEAT_Y)) < 1e-9,
+      `ที่นั่ง ${i}: y=${slot.y} ไม่ได้อยู่บนเก้าอี้แถว ${row} (ต้องเป็น ${row + CHAIR_SEAT_Y})`,
+    );
+    assert.ok(Math.abs(((slot.x % 1) + 1) % 1 - 0.5) < 1e-9, `ที่นั่ง ${i}: x=${slot.x} ไม่ได้อยู่กลาง tile เก้าอี้`);
+    assert.ok(slot.x > rx && slot.x < rx + zones.desks.rect[2], `ที่นั่ง ${i} หลุดกรอบโซน`);
+  }
+});
+
+check("★ ที่นั่งยังคำนวณจาก rect จริง: rect ที่ map.json ให้มาเปลี่ยน ที่นั่งต้องเลื่อนตามทั้งชุด", () => {
+  const moved = buildZones({ desks: [10, 4, 6, 13] });
+  const base = buildZones();
+  for (const [i, slot] of moved.desks.slots.entries()) {
+    assert.equal(slot.x, base.desks.slots[i].x - 7, `ที่นั่ง ${i} ไม่ได้เลื่อนตามแกน x ของ rect`);
+    assert.equal(slot.y, base.desks.slots[i].y + 3, `ที่นั่ง ${i} ไม่ได้เลื่อนตามแกน y ของ rect`);
+  }
+});
+
 check("bug มี 3 ที่นั่ง (ทรงพีระมิด 2+1 เหมือน stopped)", () => {
   assert.equal(zones.bug.slots.length, 3);
 });
@@ -536,10 +686,58 @@ check("approval เป็น radial 4 จุด รัศมี 3.1 tile รอ�
   }
 });
 
-check("browser มีโต๊ะผู้ถือ 1 + ช่องคิว 4", () => {
-  assert.equal(zones.browser.waiterSlots.length, 4);
+check("browser มีโต๊ะผู้ถือ 1 + ช่องคิว 2 (คิวยาวกว่านี้บอกเป็น +n ที่หัวโซน — #20)", () => {
+  assert.equal(zones.browser.waiterSlots.length, 2);
   assert.ok(zones.browser.holderSlot);
-  assert.equal(zones.browser.slots.length, 5); // holder + 4 คิว
+  assert.equal(zones.browser.slots.length, 3); // holder + 2 คิว
+});
+
+check("★ คิว Browser เป็นแถวเดียว และทั้งโซนมีไม่เกิน 2 แถว (สามแถวคือต้นเหตุที่ป้ายบังงานศิลป์)", () => {
+  const waiterRows = new Set(zones.browser.waiterSlots.map((s) => s.y));
+  assert.equal(waiterRows.size, 1, "ช่องคิวทุกช่องต้องอยู่แถวเดียวกัน");
+  const rows = new Set(zones.browser.slots.map((s) => s.y));
+  assert.ok(rows.size <= 2, `โซน browser มี ${rows.size} แถว — เกินที่พื้นที่รองรับได้`);
+  // ผู้ถืออยู่แถวบนสุดเสมอ (โต๊ะจริงของ tileset อยู่แถวนั้น และ P3 ต้องอ่านออกก่อนคิว)
+  assert.ok(zones.browser.holderSlot.y < zones.browser.waiterSlots[0].y);
+});
+
+check("★ ป้ายผู้ถือ Browser ต้องไม่ล้ำลงไปถึง 'หัว' ของคิว — เงื่อนไขที่ทำให้ผู้ถือยืนไม่ได้นั่ง (#20)", () => {
+  // เงื่อนไขนี้คือเหตุผลทั้งหมดที่โซน Browser ใช้ท่ายืน: ถ้าดันจุดเท้าผู้ถือลงไปที่เบาะเก้าอี้
+  // (by + DESK_CHAIR_ROW + CHAIR_SEAT_Y เหมือนโซน desks) ป้ายของมันจะเลื่อนลงไปคลุมหัวคิวทั้งหัว
+  // ⇒ ใครจะย้ายผู้ถือลงต้องแก้ผังคิวด้วย ไม่ใช่แค่ขยับตัวเลข
+  const headTopOf = (slot, tilePx) => slot.y * tilePx - (CHAR_SPRITE_TILES - CHAR_HEAD_TOP_TILES) * tilePx;
+  for (const tilePx of [32, 38, 48, 64]) {
+    const holderLabel = slotLabelBox(zones.browser.holderSlot, tilePx);
+    for (const [i, slot] of zones.browser.waiterSlots.entries()) {
+      assert.ok(
+        holderLabel.y2 <= headTopOf(slot, tilePx),
+        `tilePx=${tilePx}: ป้ายผู้ถือ (จบที่ ${holderLabel.y2}) ล้ำหัวคิว ${i} (เริ่มที่ ${headTopOf(slot, tilePx)})`,
+      );
+    }
+  }
+  // และเทสต์นี้ต้องจับได้จริงถ้ามีคนย้ายผู้ถือไปนั่งเก้าอี้
+  const seated = buildZones();
+  seated.browser.holderSlot = { ...seated.browser.holderSlot, y: seated.browser.rect[1] + DESK_CHAIR_ROW + CHAIR_SEAT_Y };
+  assert.ok(
+    slotLabelBox(seated.browser.holderSlot, TILE).y2 > headTopOf(seated.browser.waiterSlots[0], TILE),
+    "ถ้าย้ายผู้ถือไปนั่งเก้าอี้แล้วเทสต์ยังผ่าน แปลว่าเทสต์นี้ไม่ได้ทดสอบอะไร",
+  );
+});
+
+check("★ ป้ายผู้ถือ Browser ไม่ทับป้ายของแถวคิว และเฉี่ยวตัวคิวได้ไม่เกินครึ่งบนของสไปรต์", () => {
+  for (const tilePx of [32, 38, 48, 64]) {
+    const holderLabel = slotLabelBox(zones.browser.holderSlot, tilePx);
+    for (const [i, slot] of zones.browser.waiterSlots.entries()) {
+      assert.equal(boxesOverlap(holderLabel, slotLabelBox(slot, tilePx)), false, `tilePx=${tilePx} คิว ${i}`);
+      // ป้ายผู้ถือต้องไม่ล้ำลงไปถึง "กลางตัว" ของคิว (จุดที่ผังเดิมพังคือกินทั้งหัวและลำตัว)
+      const foot = slot.y * tilePx;
+      const headTop = foot - ANCHOR.y * (tilePx / TILE); // จุดเท้าอยู่ที่ ANCHOR.y ของเฟรม (ดู drawSpriteFrame)
+      assert.ok(
+        holderLabel.y2 <= (headTop + foot) / 2,
+        `tilePx=${tilePx}: ป้ายผู้ถือกินลงไปเกินครึ่งตัวของคิว ${i}`,
+      );
+    }
+  }
 });
 
 console.log("\nzoneAndRoleFor() — precedence P1–P9 (spec §5.2 / §7.3)");

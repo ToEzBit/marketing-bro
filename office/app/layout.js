@@ -50,6 +50,26 @@ export const DEFAULT_ZONE_RECTS = {
   bug: [24, 8, 6, 6],
 };
 
+// ---------------------------------------------------------------------------
+// ที่นั่งต้องลงบน "เก้าอี้จริง" ที่วาดไว้ในผังห้อง ไม่ใช่ลอยอยู่บนโต๊ะ (บั๊กภาพ #20)
+//
+// ค่าชุดนี้เป็นตำแหน่ง **ภายในกรอบโซน** (หน่วย tile นับจากขอบบนโซน) ไม่ใช่พิกัดสัมบูรณ์ ⇒ ยังขยับ
+// ตาม rect ที่ map.json ให้มาเหมือนเดิม (ดูเทสต์ "ที่นั่งคำนวณจาก rect ไม่ใช่ hard-code")
+// ---------------------------------------------------------------------------
+
+/**
+ * ระยะจากขอบบนของ tile เก้าอี้ ลงมาถึง "จุดเท้า" ของคนที่นั่งบนเก้าอี้ตัวนั้น (หน่วย tile)
+ *
+ * มาจากงานศิลป์จริงของ tileset: เบาะเก้าอี้อยู่ราว 0.5–0.8 ของ tile และขาเก้าอี้จบราว 0.95 ส่วนท่า
+ * นั่งเก้าอี้ของสไปรต์ (sit เฟรม 2) วาดปลายเท้าไว้ที่ระดับ anchor พอดี ⇒ วางจุดเท้าไว้ราว 0.8 ของ
+ * tile เก้าอี้ ก้นจะลงตรงเบาะและปลายเท้าอยู่หน้าขาเก้าอี้
+ */
+export const CHAIR_SEAT_Y = 0.8;
+/** โซน desks/browser: บล็อกโต๊ะสูง 2 tile เริ่มที่แถวที่ 1 ของโซน ⇒ เก้าอี้อยู่แถวที่ 2 (ช่องเว้าใส่ขา) */
+export const DESK_CHAIR_ROW = 2;
+/** แถวโต๊ะของโซน desks ซ้ำทุก ๆ 5 tile (row 2-3 / 7-8 / 12-13 ของห้อง) */
+export const DESK_ROW_PITCH = 5;
+
 /**
  * คำนวณที่นั่งแบบ grid ภายใน rect โซน — ห้าม hard-code พิกัดที่นั่งเด็ดขาด (spec §7.2)
  *
@@ -128,10 +148,34 @@ export function buildZones(rectOverrides = {}) {
   zones.lounge.slots = gridSlots(zones.lounge.rect, 2, 2, { ...GRID, padTop: 1.9 });
   // stopped/bug: 3 ที่นั่งเท่าเดิม แต่เป็นทรงพีระมิด 2+1 แทน 3 ที่เรียงแถวเดียว — สามคอลัมน์ใน 6 tile
   // ทำให้ระยะห่างเหลือ 1.7 tile ซึ่งแคบกว่าความกว้างป้าย ป้ายจึงชนกันแน่นอนไม่ว่าจะบีบข้อความแค่ไหน
-  zones.stopped.slots = gridSlots(zones.stopped.rect, 2, 2, { ...GRID, padTop: 2.4, count: 3 });
-  zones.bug.slots = gridSlots(zones.bug.rect, 2, 2, { ...GRID, padTop: 2.4, count: 3 });
-  // desks: แถวอยู่ใต้แถวโต๊ะจริงของ map.json (โต๊ะ row 2/7/12, เก้าอี้ row 3/8/13) — 3.2 / 8.0 / 12.8
-  zones.desks.slots = gridSlots(zones.desks.rect, 2, 3, { ...GRID, padTop: 2.2 });
+  //
+  // แถวบนของสองโซนนี้ถูกดันขึ้น 0.3 tile จาก 10.4 เดิม (บั๊กภาพ #20) ด้วยเหตุผลสองข้อ:
+  //  1. **ป้ายแถวบนเคยพาดผ่านหัวของแถวล่าง** (ป้ายจบที่ 365.8 ส่วนหัวแถวล่างเริ่มที่ 358.4 ที่ tilePx 32)
+  //     แถวล่างขยับหนีลงไม่ได้ (12.8 คือต่ำสุดที่ป้ายยังไม่ล้นก้นโซน) ⇒ ต้องดันแถวบนขึ้นแทน
+  //  2. โต๊ะยาวของโซน bug อยู่ที่ row 10-11 ⇒ จุดเท้า 10.4 ตกลงบน "แผ่นบนโต๊ะ" พอดี ตัว failed ที่ใช้
+  //     ท่านั่งกับพื้นเลยอ่านเป็นนั่งขัดสมาธิบนโต๊ะ · 10.1 ทำให้ทั้งตัวขึ้นไปอยู่เหนือขอบโต๊ะ = นั่งอยู่
+  //     "หลังโต๊ะ" แทน (โซน stopped โต๊ะอยู่ row 9-10 อยู่แล้ว ค่านี้ไม่เปลี่ยนการอ่านของมัน)
+  // ที่นั่งสองโซนนี้ไม่ได้ลงบนเก้าอี้จริง (เก้าอี้อยู่ row 11) เพราะถ้าลงไปนั่งจริง ป้ายต้องพลิกขึ้นบน
+  // แล้วไปทับแถบ marker "Schedule auto-pause" ของโซน bug ซึ่งใช้ที่ว่างแถบเดียวกันหมด
+  const SIDE_ZONE_SEAT_TOP = 2.1;
+  zones.stopped.slots = gridSlots(zones.stopped.rect, 2, 2, { ...GRID, padTop: SIDE_ZONE_SEAT_TOP, count: 3 });
+  zones.bug.slots = gridSlots(zones.bug.rect, 2, 2, { ...GRID, padTop: SIDE_ZONE_SEAT_TOP, count: 3 });
+  // ---- desks: ที่นั่งต้องลงบน "เก้าอี้จริง" ของ map.json ไม่ใช่บนโต๊ะ (บั๊กภาพ #20) ----
+  // ผังจริงที่วัดจาก map.json (ไม่ใช่ที่คอมเมนต์เก่าเขียนไว้ผิดว่า "โต๊ะ row 2/7/12 เก้าอี้ row 3/8/13"):
+  //   โต๊ะเป็นบล็อกสูง **2 tile** ที่ layer walls — row 2-3, 7-8, 12-13 (แถวบน = หน้าโต๊ะ+โน้ตบุ๊ก,
+  //   แถวล่าง = ลิ้นชัก โดยมีช่องเว้าใส่ขาตรงกลางบล็อกละหนึ่งช่อง)
+  //   **เก้าอี้มีจริง** เป็น prop วางในช่องเว้านั้น — tile (18,3) (21,3) (18,8) (21,8) (18,13) (21,13)
+  // ⇒ คอลัมน์ที่นั่งตรงกับกลาง tile เก้าอี้พอดี (18.5 / 21.5) และ **แถว** ต้องเป็นแถวเก้าอี้ + CHAIR_SEAT_Y
+  // เดิม padTop 2.2 ทำให้จุดเท้าอยู่ที่ 3.2/8.0/12.8 = ขอบบนของแถวเก้าอี้ ⇒ ลำตัวแผ่ขึ้นไปคลุมโต๊ะทั้งตัว
+  // (อ่านเป็น "นั่งขัดสมาธิบนโต๊ะ" เพราะ sit เฟรม 0 เป็นท่านั่งกับพื้น — ดู restFrameIndex)
+  const deskSeatTop = DESK_CHAIR_ROW + CHAIR_SEAT_Y;
+  zones.desks.slots = gridSlots(zones.desks.rect, 2, 3, {
+    ...GRID,
+    padTop: deskSeatTop,
+    // ระยะห่างระหว่างแถวของ gridSlots มาจาก usableH ⇒ บังคับ padBottom ให้ระยะนั้นเท่ากับ
+    // ระยะซ้ำของแถวโต๊ะจริงพอดี (ไม่งั้นแถว 2/3 จะเลื่อนหลุดจากเก้าอี้ไปทีละนิด)
+    padBottom: zones.desks.rect[3] - deskSeatTop - (3 - 1) * DESK_ROW_PITCH,
+  });
 
   {
     const [ax, ay, aw, ah] = zones.approval.rect;
@@ -142,16 +186,42 @@ export function buildZones(rectOverrides = {}) {
 
   {
     const [bx, by] = zones.browser.rect;
-    zones.browser.holderSlot = { x: bx + 2.6, y: by + 2, dir: "right" };
-    // คิว 2×2 กางออกจนกล่องป้ายไม่ชนกันและไม่ล้นโซน (แถวล่างสุดที่ by+4.85 คือขอบสุดท้ายที่ยังพอดี)
+    // ---- ทำไมผู้ถือ Browser **ยืน** ที่โต๊ะ ไม่ได้นั่งเก้าอี้เหมือนโซน desks (#20) ----
+    // โต๊ะตัวนี้เป็นบล็อกเดียวกับโซน desks เป๊ะ (โต๊ะ 2 tile + เก้าอี้หันข้างในช่องเว้าที่ tile (26,3))
+    // แต่โซนนี้สูงแค่ 6 tile และต้องใส่ให้ครบสี่อย่างเรียงกันลงมา: ตัวผู้ถือ → ป้ายผู้ถือ → ตัวคิว → ป้ายคิว
+    // งบแนวตั้งที่เหลือหลังหักแถบหัวโซน (40px) คือ ~150px แต่ของสี่อย่างนั้นกินรวม ~153px ⇒ ขาดอยู่แล้ว
+    // ตั้งแต่ต้น · ถ้าดันจุดเท้าผู้ถือลงไปที่เบาะเก้าอี้ (by+2.8) ป้ายของมันจะเลื่อนลงไปทับ **หัว** ของ
+    // คิวแถวล่างเต็ม ๆ (ป้ายจบที่ 154.6px ส่วนหัวคิวเริ่มที่ ~140px ที่ tilePx 32) ซึ่งเป็นบั๊กที่โซนนี้
+    // เพิ่งแก้ไป · เลื่อนคิวลงก็ไม่ได้ (ป้ายคิวล้นก้นโซน) เลื่อนคิวหนีออกด้านข้างก็ไม่ได้ (ป้ายกว้าง
+    // 2.75 tile ⇒ ช่องซ้ายมีที่พอสำหรับป้าย แต่ตัวจะยังอยู่ใต้ป้ายผู้ถืออยู่ดี)
+    // ⇒ ทั้งโซนนี้ใช้ท่า "ยืน" (ดู render.js) และคงจุดเท้าไว้ที่ขอบใกล้ของโต๊ะเหมือนเดิม ซึ่งอ่านออกว่า
+    // ยืนอยู่ที่โต๊ะ ไม่ใช่นั่งอยู่บนโต๊ะ · จะให้ผู้ถือนั่งได้ต้องยอมตัดช่องคิวเหลือช่องเดียว
+    // (x เลื่อนมาที่กลาง tile เก้าอี้พอดี = bx+2.5 ให้ตรงกับช่องเว้าของโต๊ะ)
+    zones.browser.holderSlot = { x: bx + 2.5, y: by + 2, dir: "right" };
+    // ---- ทำไมคิวเหลือ "แถวเดียว 2 ช่อง" (#20) ----
+    // หนึ่งแถวกินพื้นที่แนวตั้ง = ตัวละคร 64px + กล่องป้าย 29px ≈ 93px แต่โซนนี้สูง 6 tile และเสียให้
+    // แถบหัวโซน (zoneHeaderHeight = 40px) ไป ⇒ เหลือใช้จริง ~150px ที่ tilePx ต่ำสุด = **สองแถว**
+    // ผังเดิม (ผู้ถือ + คิว 2×2 = สามแถว) จึงเอาป้ายแถวบนไปบังหัว/ตัวของแถวล่างเต็ม ๆ ทั้งความกว้าง
+    // ตอนนี้เหลือผู้ถือแถวบน + คิวแถวล่างสุดที่ยังผ่าน containment ⇒ ป้ายผู้ถือเฉี่ยวหัวคิวแค่ไม่กี่ px
+    // ตรงช่วงที่มันซ้อนกันตามแนวนอนเท่านั้น · คิวที่ยาวกว่านี้บอกเป็น `+n` ที่หัวโซนเหมือนโซนอื่น
+    // (ลำดับคิว/เส้นตายของตัวที่ไม่ได้ยืนอยู่ ดูได้จากการคลิกชิป +n — spec §7.5)
+    // ห้ามเพิ่มแถวกลับเข้ามาโดยไม่รัน layout.test.js: ระยะ 2.85 tile ระหว่างสองแถวคือค่าที่กว้างที่สุด
+    // ที่เป็นไปได้แล้ว (แถวล่างขยับลงอีกไม่ได้ ป้ายจะล้นก้นโซนที่ tilePx 32)
     zones.browser.waiterSlots = [
-      { x: bx + 1.5, y: by + 3.6, dir: "up" },
-      { x: bx + 4.5, y: by + 3.6, dir: "up" },
       { x: bx + 1.5, y: by + 4.85, dir: "up" },
       { x: bx + 4.5, y: by + 4.85, dir: "up" },
     ];
     // browser zone ไม่มี "slots" ทั่วไป (assignSlots ใช้ holderSlot/waiterSlots แทน)
     zones.browser.slots = [zones.browser.holderSlot, ...zones.browser.waiterSlots];
+  }
+
+  // ที่นั่งที่ติดก้นโซนจนใต้เท้าไม่เหลือที่ให้ป้าย ให้พลิกป้ายขึ้นไปเหนือหัว (แถวเก้าอี้ล่างสุดของ desks
+  // อยู่ที่ y 13.8 จากก้นโซน 14 ⇒ ไม่มี tilePx ค่าไหนที่ป้ายใต้เท้าลงได้เลย) — ธงติดที่ตัว slot
+  // แหล่งเดียว แล้ว slotLabelBox / render.js / labelFitReport อ่านจากธงเดียวกันหมด
+  for (const id of ZONE_IDS) {
+    for (const slot of zones[id].slots || []) {
+      if (labelAboveFor(zones[id], slot)) slot.labelAbove = true;
+    }
   }
 
   return zones;
@@ -302,6 +372,23 @@ export const CHAR_LABEL_H = LABEL_LINE_H + LABEL_PLATE_H;
 export const CHAR_LABEL_W_TILES = 2.75;
 /** ขอบบนของกล่องป้าย = จุดเท้าตัวละคร + ระยะนี้ */
 export const CHAR_LABEL_TOP_OFFSET = 4;
+/**
+ * ความสูงสไปรต์ตัวละครเป็น "จำนวน tile" — เฟรม 64px บน tile ต้นฉบับ 32px = 2 tile พอดี และเพราะ
+ * render.js ขยายสไปรต์ด้วย `zoom = tilePx / baseTilePx` เท่ากับที่ห้องขยาย อัตราส่วนนี้จึงคงที่ทุกขนาดจอ
+ * (ใช้เป็น "ระยะเผื่อหัว" ของป้ายที่พลิกขึ้นไปอยู่ด้านบน — เผื่อไว้เกินจริงนิดหน่อยจาก ANCHOR.y/32)
+ */
+export const CHAR_SPRITE_TILES = 2;
+/** ช่องว่างระหว่างขอบล่างของป้ายที่พลิกขึ้นไปด้านบน กับหัวตัวละคร */
+export const CHAR_LABEL_ABOVE_GAP = 4;
+/**
+ * ที่ว่างเหนือหัวภายในเฟรมสไปรต์ (หน่วย tile) — เฟรม 64px ของ LPC เว้นที่ไว้เหนือหัวราว 13px
+ * (ค่าน้อยสุดที่วัดได้จริงจากทุกทิศของชีต idle/sit ในชุด default) ⇒ "หัวจริง" ของตัวละครเริ่มที่
+ * `จุดเท้า − (CHAR_SPRITE_TILES − CHAR_HEAD_TOP_TILES) × tilePx`
+ * ใช้เป็นเส้นที่ **ป้ายของที่นั่งอื่นห้ามล้ำลงมา** — นี่คือเงื่อนไขที่ตัดสินผังโซน Browser ทั้งโซน
+ */
+export const CHAR_HEAD_TOP_TILES = 0.4;
+/** ครึ่งความกว้างของ "ตัวจริง" ในเฟรมสไปรต์ (หน่วย tile) — เฟรม 64px มีตัวกว้างจริงราว 28px */
+export const CHAR_BODY_HALF_W_TILES = 0.45;
 /** ระยะร่นเข้ามาจากขอบโซน ที่ป้ายห้ามล้ำออกไป */
 export const ZONE_LABEL_INSET = 2;
 /** baseline ของป้ายหัวโซน วัดจากขอบบนโซน (โซน Approval ใช้ตัวใหญ่กว่า จึงต่ำลงมาอีกนิด) */
@@ -336,16 +423,65 @@ export function zoneLabelArea(zone, tilePx = TILE) {
 /**
  * กล่องป้ายชื่อของตัวละครที่ยืนอยู่ที่ (footX, footY) — ขนาดตายตัวเสมอ ไม่ขึ้นกับข้อความ/ฟอนต์
  * นี่คือกล่องเดียวกับที่ render.js วาดแผ่นรอง และเดียวกับที่ layout.test.js ตรวจ containment
+ *
+ * @param {boolean} [above] พลิกไปอยู่ **เหนือหัว** แทนใต้เท้า — ใช้กับที่นั่งที่ติดก้นโซนจนใต้เท้าไม่เหลือ
+ *   ที่ให้ป้าย (ดู labelAboveFor) ทางเลือกอื่นคือห้ามที่นั่งอยู่ตรงนั้น ซึ่งแปลว่าห้ามนั่งเก้าอี้แถวล่างสุด
  */
-export function characterLabelBox(footX, footY, tilePx = TILE) {
+export function characterLabelBox(footX, footY, tilePx = TILE, above = false) {
   const half = (CHAR_LABEL_W_TILES * tilePx) / 2;
-  const top = footY + CHAR_LABEL_TOP_OFFSET;
+  const top = above
+    ? footY - CHAR_SPRITE_TILES * tilePx - CHAR_LABEL_ABOVE_GAP - CHAR_LABEL_H
+    : footY + CHAR_LABEL_TOP_OFFSET;
   return { x1: footX - half, y1: top, x2: footX + half, y2: top + CHAR_LABEL_H };
+}
+
+/** ขอบบนของ "หัวจริง" ของตัวละครที่อยู่ที่ที่นั่งนี้ (px) — เส้นที่ป้ายของที่นั่งอื่นห้ามล้ำลงมา */
+export function slotHeadTop(slot, tilePx = TILE) {
+  return (slot.y - CHAR_SPRITE_TILES + CHAR_HEAD_TOP_TILES) * tilePx;
+}
+
+/**
+ * กล่องป้าย `box` ไปคลุม "หัว" ของคนที่นั่งอยู่ที่ slot ไหม — จริงเมื่อทับกันทั้งสองแกน:
+ * แนวตั้งต้องคาบเกี่ยวช่วง [หัว, เท้า] ของคนนั้น (แค่ต่ำกว่าหัวอย่างเดียวไม่พอ — ป้ายที่อยู่ใต้เท้า
+ * ของเขาก็ "ต่ำกว่าหัว" เหมือนกัน) และแนวนอนต้องคาบเกี่ยวความกว้างตัวจริงของเขา
+ */
+function coversHeadOf(box, slot, tilePx) {
+  const half = CHAR_BODY_HALF_W_TILES * tilePx;
+  const foot = slot.y * tilePx;
+  return (
+    box.y2 > slotHeadTop(slot, tilePx) &&
+    box.y1 < foot &&
+    box.x1 < slot.x * tilePx + half &&
+    box.x2 > slot.x * tilePx - half
+  );
+}
+
+/**
+ * ที่นั่งนี้ต้องพลิกป้ายขึ้นไปไว้เหนือหัวไหม — พลิกเมื่อกล่องป้ายแบบ "ใต้เท้า" ทำผิดข้อใดข้อหนึ่ง:
+ *  1. **ล้นก้นโซนของตัวเอง** — แถวเก้าอี้ล่างสุดของ desks อยู่ห่างก้นโซนแค่ 0.2 tile
+ *  2. **ไปคลุมหัวของที่นั่งอื่นในโซนเดียวกัน** — แถวบนของ stopped/bug นั่งอยู่บนเก้าอี้ ป้ายใต้เท้าของมัน
+ *     จะพาดผ่านหัวคนแถวล่างพอดี (ที่นั่งแถวล่างขยับลงหนีไม่ได้ ป้ายจะล้นก้นโซนแทน)
+ * และพลิกได้ก็ต่อเมื่อ **ข้างบนมีที่จริง** ไม่งั้นคาไว้ใต้เท้าเหมือนเดิม (ดีกว่าย้ายไปทับหัวโซน)
+ *
+ * ตัดสินที่ **MIN_TILE_PX ค่าเดียว** โดยตั้งใจ ไม่ใช่ที่ tilePx จริงตอนรัน: กล่องป้ายสูงเป็น px ตายตัว
+ * แต่โซนสูงตาม tile ⇒ ยิ่ง tilePx ใหญ่ยิ่งลงง่าย ถ้าตัดสินตามขนาดจอ ป้ายจะเด้งสลับบน/ล่างตอนย่อ-ขยาย
+ * หน้าต่างหรือเข้าโหมดเต็มจอ · เลือกที่ค่าต่ำสุด = ที่นั่งไหนพลิกก็พลิกเหมือนกันทุกขนาดจอ
+ */
+export function labelAboveFor(zone, slot, tilePx = MIN_TILE_PX) {
+  const area = zoneLabelArea(zone, tilePx);
+  const below = characterLabelBox(slot.x * tilePx, slot.y * tilePx, tilePx, false);
+  const above = characterLabelBox(slot.x * tilePx, slot.y * tilePx, tilePx, true);
+  const overflowsZone = below.y2 > area.y2;
+  const coversNeighbourHead = (zone.slots || []).some(
+    (other) => other !== slot && coversHeadOf(below, other, tilePx),
+  );
+  if (!overflowsZone && !coversNeighbourHead) return false;
+  return above.y1 >= area.y1;
 }
 
 /** กล่องป้ายของ "ที่นั่ง" (พิกัด tile) — wrapper ของ characterLabelBox ให้เทสต์/self-check อ่านง่าย */
 export function slotLabelBox(slot, tilePx = TILE) {
-  return characterLabelBox(slot.x * tilePx, slot.y * tilePx, tilePx);
+  return characterLabelBox(slot.x * tilePx, slot.y * tilePx, tilePx, slot.labelAbove);
 }
 
 /**
@@ -519,6 +655,24 @@ export function directionFromVector(dx, dy, directions = DEFAULT_DIRECTIONS) {
   const list = Array.isArray(directions) && directions.length ? directions : DEFAULT_DIRECTIONS;
   const wanted = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : dy > 0 ? "down" : "up";
   return list.includes(wanted) ? wanted : list[0];
+}
+
+/**
+ * เฟรม "ท่าอยู่นิ่ง" ที่ต้องวาดให้สถานะหนึ่ง — ชีตท่าอยู่นิ่งของ LPC **ไม่ใช่ลูปอนิเมชัน** แต่เป็น
+ * ท่าคนละท่ารวมไว้ไฟล์เดียว: `sit.png` เฟรม 0/1 = นั่งขัดสมาธิกับพื้น, เฟรม **2 = นั่งเก้าอี้**
+ * (วัดจากชีตจริง: เฟรม 2 ทิศ down มีขาห้อยลงและปลายเท้าอยู่ที่ระดับ anchor พอดี)
+ *
+ * ชุด asset เป็นคนบอกว่าสถานะไหนใช้ท่าไหนผ่าน `manifest.states.<state>.frame` — ไม่ระบุ = 0
+ * (พฤติกรรมเดิม) และค่าที่เกินจำนวนเฟรมจริงของชีตถูกหนีบลง ⇒ ชุดที่ sit มีเฟรมเดียวก็ไม่อ่านเลยชีต
+ * @param {{frame?:number}|undefined} stateDef ก้อน `manifest.states[state]`
+ * @param {number} frameCount จำนวนเฟรมของชีตที่คลี่ fallback แล้ว (`animations.<anim>.frames`)
+ */
+export function restFrameIndex(stateDef, frameCount) {
+  const wanted = Math.floor(Number(stateDef?.frame));
+  if (!Number.isFinite(wanted) || wanted <= 0) return 0;
+  const count = Math.floor(Number(frameCount));
+  if (!(count > 1)) return 0;
+  return Math.min(wanted, count - 1);
 }
 
 /**
