@@ -132,6 +132,7 @@ async function harness(options: { officeUiPort?: number } = {}): Promise<Harness
     scheduleStatePath: join(dir, "schedules.json"),
     browserProfileDir: join(dir, "browser-profile"),
     browserAutoApprove: false,
+    yoloMode: false,
     skillsDir: join(dir, "skills"),
     skillsPluginDir: join(dir, "skills-plugin"),
     // Off by default: the race tests below are about the bot, not the

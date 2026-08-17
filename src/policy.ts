@@ -291,6 +291,110 @@ const SUBCOMMAND_GUARDS: Record<string, Record<string, (args: string[]) => boole
   },
 };
 
+/**
+ * ADR 0010 — commands that destroy work with no way back. In YOLO_MODE these
+ * are the only Bash commands that still reach a human; with the flag off they
+ * are irrelevant here (everything outside the read-only allowlist already asks)
+ * and matter only to `decideScheduled`, which denies them outright.
+ *
+ * This is an ACCIDENT GUARD, not a security boundary: it reads the command as
+ * written. A delete hidden inside `$(…)`, `python -c`, or a shell script the
+ * agent wrote a moment ago goes straight through — see ADR 0010 Consequences.
+ */
+const DESTRUCTIVE_COMMANDS = new Set(["rm", "rmdir", "unlink", "shred", "srm", "truncate"]);
+
+/**
+ * Wrappers that run another command. The real command is the first bare word
+ * after them, so the scan steps past the wrapper and its flags/assignments —
+ * `find . | xargs rm` and `sudo rm -rf x` are the accidents worth catching.
+ */
+const COMMAND_WRAPPERS = new Set([
+  "sudo", "doas", "xargs", "env", "time", "nohup", "nice", "command", "do", "then", "else",
+]);
+
+/** Commands that destroy only under specific flags. Args exclude the command. */
+const DESTRUCTIVE_FLAGS: Record<string, (args: string[]) => boolean> = {
+  /** `dd of=file` overwrites that file; without `of=` it writes to stdout. */
+  dd: (args) => args.some((arg) => arg.startsWith("of=")),
+  /** Every `--delete*` variant removes files from the destination. */
+  rsync: (args) => args.some((arg) => arg.startsWith("--delete")),
+  /**
+   * `-delete` removes matches. The exec predicates run a command this scan
+   * never sees, so they ask too — `find … -exec rm {} +` is exactly the shape
+   * an accident takes, and plain searches don't use them.
+   */
+  find: (args) =>
+    args.some((arg) =>
+      ["-delete", "-exec", "-execdir", "-ok", "-okdir"].includes(arg),
+    ),
+};
+
+/** git subcommands that throw away work. Args exclude `git <subcommand>`. */
+const DESTRUCTIVE_GIT: Record<string, (args: string[]) => boolean> = {
+  /** Deletes untracked files. `-n`/`--dry-run` only lists them. */
+  clean: (args) => !args.some((arg) => arg === "-n" || arg === "--dry-run"),
+  /** `git rm` deletes; that is the whole subcommand. */
+  rm: () => true,
+  /** Only `--hard` discards the working tree; soft/mixed keep the files. */
+  reset: (args) => args.includes("--hard"),
+  /**
+   * `git restore` overwrites the working tree from another source. The one
+   * form that does not touch files is `--staged` alone (it just unstages).
+   */
+  restore: (args) => !(args.includes("--staged") && !args.includes("--worktree")),
+  /**
+   * `git checkout <path>` overwrites local edits, while `git checkout <branch>`
+   * refuses to clobber them. git itself can only tell the two apart by looking
+   * at the repo, so this asks on the shapes that name a path — `--`, `.`, a
+   * slash, or forced. A branch whose name contains `/` asks needlessly; that is
+   * the safe direction to be wrong in.
+   */
+  checkout: (args) =>
+    args.some(
+      (arg) => arg === "--" || arg === "." || arg === "-f" || arg === "--force" ||
+        (!arg.startsWith("-") && arg.includes("/")),
+    ),
+  /** `drop`/`clear` throw stashed work away; `list`/`show`/`pop` do not. */
+  stash: (args) => args[0] === "drop" || args[0] === "clear",
+};
+
+/** Strips wrappers, flags and `VAR=value` prefixes to find the real command. */
+function realCommand(tokens: string[]): string[] {
+  let index = 0;
+  while (index < tokens.length) {
+    const token = tokens[index]!;
+    if (COMMAND_WRAPPERS.has(token) || token.startsWith("-") || /^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) {
+      index += 1;
+      continue;
+    }
+    return tokens.slice(index);
+  }
+  return [];
+}
+
+/**
+ * True when any segment of the command destroys files or uncommitted work.
+ * Checks every chained segment, so `npm test && rm -rf dist` still asks.
+ */
+export function isDestructiveBash(command: string): boolean {
+  return command.split(CHAIN_OPERATORS).some((segment) => {
+    const tokens = realCommand(tokenize(segment));
+    const name = tokens[0];
+    if (name === undefined) return false;
+    if (DESTRUCTIVE_COMMANDS.has(name)) return true;
+
+    if (name === "git") {
+      const subcommand = tokens[1];
+      if (subcommand === undefined) return false;
+      const guard = DESTRUCTIVE_GIT[subcommand];
+      return guard ? guard(tokens.slice(2)) : false;
+    }
+
+    const guard = DESTRUCTIVE_FLAGS[name];
+    return guard ? guard(tokens.slice(1)) : false;
+  });
+}
+
 export type Decision =
   | { action: "allow"; reason: string }
   | { action: "ask"; reason: string }
@@ -330,9 +434,15 @@ export function isBrowserTool(toolName: string): boolean {
  */
 export function decideBrowser(
   toolName: string,
-  browser: { approved: boolean },
+  browser: { approved: boolean; yolo?: boolean },
 ): Decision {
   if (BROWSER_ALWAYS_ASK.has(toolName)) {
+    // ADR 0010: YOLO_MODE waves through everything that cannot delete, so
+    // uploading a file passes. `run_code_unsafe` still asks — it runs code
+    // this policy never sees, which is the plainest delete path there is.
+    if (browser.yolo && toolName === BROWSER_UPLOAD_TOOL) {
+      return { action: "allow", reason: "YOLO_MODE: อัปโหลดไม่ได้ลบอะไรบนเครื่อง" };
+    }
     return {
       action: "ask",
       reason:
@@ -382,6 +492,15 @@ export function decideScheduled(
     return { action: "allow", reason: "posts a file into the schedule thread" };
   }
   if (toolName === "Bash") {
+    const command = typeof input.command === "string" ? input.command : "";
+    // ADR 0010: deleting is the one act that always needs a human, and a
+    // scheduled Run has none to ask (ADR 0004) — so it can only be denied.
+    if (isDestructiveBash(command)) {
+      return {
+        action: "deny",
+        reason: "scheduled run ลบไฟล์หรือล้างงานที่ยังไม่ commit ไม่ได้ — ทำต่อด้วยวิธีอื่นหรือรายงานแทน",
+      };
+    }
     return { action: "allow", reason: "scheduled grant covers Bash" };
   }
 
@@ -519,10 +638,16 @@ function segmentAllowed(tokens: string[], extraAllow: string[]): boolean {
   return guard ? guard(tokens.slice(2)) : true;
 }
 
+/**
+ * ADR 0010: with `yolo` on, the question flips from "is this safe?" to "does
+ * this destroy something?" — everything runs unasked except the commands in
+ * `isDestructiveBash`. Read the Consequences of ADR 0010 before relying on it.
+ */
 export function decide(
   toolName: string,
   input: Record<string, unknown>,
   extraBashAllow: string[],
+  yolo = false,
 ): Decision {
   if (READ_ONLY_TOOLS.has(toolName)) {
     return { action: "allow", reason: `${toolName} only reads` };
@@ -539,8 +664,18 @@ export function decide(
     if (command && isReadOnlyBash(command, extraBashAllow)) {
       return { action: "allow", reason: "read-only shell command" };
     }
+    if (yolo) {
+      return isDestructiveBash(command)
+        ? { action: "ask", reason: "ลบไฟล์หรือล้างงานที่ยังไม่ commit — ด่านเดียวที่ YOLO_MODE ไม่ข้ามให้" }
+        : { action: "allow", reason: "YOLO_MODE: ไม่ใช่คำสั่งลบ" };
+    }
     return { action: "ask", reason: "shell command is not on the read-only allowlist" };
   }
 
+  // Write/Edit outside the workspace, and any tool this policy does not know.
+  // Neither can delete a file, so YOLO_MODE lets them through.
+  if (yolo) {
+    return { action: "allow", reason: "YOLO_MODE: ไม่ใช่คำสั่งลบ" };
+  }
   return { action: "ask", reason: `${toolName} can change the host` };
 }

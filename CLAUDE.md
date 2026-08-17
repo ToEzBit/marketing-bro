@@ -14,6 +14,7 @@ Discord bot ที่สั่งงาน Claude Agent SDK บนเครื�
   - [0006](./docs/adr/0006-browser-queue.md) — Browser เข้าคิวรอ (FIFO) แทนการปฏิเสธเมื่อไม่ว่าง
   - [0007](./docs/adr/0007-content-pipeline-md-handoff.md) — Content pipeline ส่งงานข้าม Schedule ด้วยไฟล์ md + คนอนุมัติก่อนโพสต์
   - [0008](./docs/adr/0008-operator-preapproved-browser.md) — Operator ปิด Approval ครั้งแรกของ browser ใน Task ได้ผ่าน config (BROWSER_AUTO_APPROVE)
+  - [0010](./docs/adr/0010-yolo-mode-delete-is-the-only-gate.md) — YOLO_MODE: อนุมัติทุกอย่างยกเว้นคำสั่งลบ (และ Scheduled Run ลบไม่ได้เลย)
 
 ## คำสั่ง
 

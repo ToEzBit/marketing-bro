@@ -32,6 +32,12 @@ export type Config = {
    * The two host-escape tools (file upload / run_code_unsafe) still ask.
    */
   browserAutoApprove: boolean;
+  /**
+   * ADR 0010 — auto-approve every tool call in an interactive Task except the
+   * ones that delete files or throw away uncommitted work. Off by default; an
+   * accident guard, not a security boundary (read that ADR before turning it on).
+   */
+  yoloMode: boolean;
   /** Central Skill folder the Operator drops skill folders into (ADR 0005). */
   skillsDir: string;
   /** Generated plugin scaffold the SDK loads the skills through. */
@@ -135,6 +141,7 @@ export function loadConfig(): Config {
       process.env.BROWSER_PROFILE_DIR ?? "./.state/browser-profile",
     ),
     browserAutoApprove: flag("BROWSER_AUTO_APPROVE"),
+    yoloMode: flag("YOLO_MODE"),
     skillsDir: expandPath(process.env.SKILLS_DIR ?? DEFAULT_SKILLS_DIR),
     skillsPluginDir: expandPath("./.state/skills-plugin"),
     officeUiPort: optionalPositiveInt("OFFICE_UI_PORT"),

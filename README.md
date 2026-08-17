@@ -109,6 +109,7 @@ npm run dev
 | `SKILLS_DIR` | — | โฟลเดอร์ Skill กลาง (ค่าเริ่มต้น `./skills` — ADR 0005) |
 | `BROWSER_PROFILE_DIR` | — | Chrome profile ของบอท เก็บ login ค้างไว้ — อย่าเอาเข้า git (ค่าเริ่มต้น `./.state/browser-profile`) |
 | `OFFICE_UI_PORT` | — | เปิด Office UI ที่ `http://127.0.0.1:<port>` (ไม่ตั้ง = ปิด) — read-only ดูอย่างเดียว สั่งงานไม่ได้ |
+| `YOLO_MODE` | `false` | ⚠️ อนุมัติทุก tool call ใน Task ให้อัตโนมัติ **ยกเว้นคำสั่งลบไฟล์/ล้างงานที่ยังไม่ commit** ที่ยังถาม · ครอบ `BROWSER_AUTO_APPROVE` ให้ในตัว · เป็นกันพลาด ไม่ใช่กำแพงกันภัย — อ่าน ADR 0010 ก่อนเปิด |
 
 ---
 
@@ -145,8 +146,18 @@ host ได้ (ADR 0003) · บัญชีที่ล็อกอินค้
 ครั้งแรกได้ (เหมาะกับบอทที่ Operator ใช้คนเดียว — สอง tool อันตรายยังถามเสมอ
 ดูเงื่อนไขและความเสี่ยงใน ADR 0008)
 
+**YOLO_MODE** — ตั้ง `YOLO_MODE=true` แล้วทุก tool call ใน Task ผ่านหมดโดยไม่ถาม
+**ยกเว้นคำสั่งที่ลบไฟล์หรือล้างงานที่ยังไม่ commit** (`rm`, `rmdir`, `unlink`, `shred`,
+`truncate`, `git clean`, `git rm`, `git reset --hard`, `git checkout <path>`, `git restore`,
+`git stash drop/clear`, `find -delete`/`-exec`, `rsync --delete`, `dd of=`) ที่ยังขึ้นปุ่มเสมอ
+— รวมถึงตอนต่อท้ายคำสั่งอื่น (`npm test && rm -rf dist`) และผ่าน `sudo`/`xargs`
+· การแก้ไฟล์ไม่ติดด่านนี้ (`Edit`/`Write`, `sed -i`, `>` และ `>>`)
+· ⚠️ **เป็นกันพลาด ไม่ใช่กำแพงกันภัย** — การลบที่ซ่อนใน `$(...)`, `python -c`,
+หรือสคริปต์ที่ agent เพิ่งเขียนเอง ผ่านฉลุย รายละเอียดและรูที่รู้ตัวอยู่ใน ADR 0010
+
 **Schedule** — ตอนรันไม่มีคนเฝ้า จึงใช้ **Grant** ที่มอบตอนสร้างแทนปุ่มอนุมัติ:
-พื้นฐานคืออ่าน/เขียนใน workspace + Bash ทุกคำสั่ง ส่วน browser ต้องเลือกมอบเพิ่ม
+พื้นฐานคืออ่าน/เขียนใน workspace + Bash ทุกคำสั่ง **ยกเว้นคำสั่งลบ ซึ่งถูกปฏิเสธเสมอ**
+(ไม่มีคนให้กดปุ่ม — ADR 0010) ส่วน browser ต้องเลือกมอบเพิ่ม
 ตอนสร้าง และไม่ว่ามอบอะไรไว้ การเขียนไฟล์นอก workspace กับ `browser_run_code_unsafe`
 ถูกปฏิเสธเสมอ (ADR 0004)
 
