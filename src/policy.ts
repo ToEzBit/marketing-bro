@@ -655,7 +655,7 @@ function hasNoOperands(args: string[]): boolean {
 }
 
 /** True when every chained segment of the command is on the allowlist. */
-function isReadOnlyBash(command: string, extraAllow: string[]): boolean {
+function isReadOnlyBash(command: string): boolean {
   const stripped = command
     .replace(DEV_NULL_REDIRECT, " ")
     .replace(FD_DUPLICATION, " ");
@@ -667,7 +667,7 @@ function isReadOnlyBash(command: string, extraAllow: string[]): boolean {
   return segments.every((segment) => {
     const tokens = tokenize(segment);
     if (tokens.length === 0) return false;
-    return segmentAllowed(tokens, extraAllow);
+    return segmentAllowed(tokens);
   });
 }
 
@@ -678,7 +678,7 @@ function isPlainWord(token: string): boolean {
 
 const FOR_VARIABLE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-function segmentAllowed(tokens: string[], extraAllow: string[]): boolean {
+function segmentAllowed(tokens: string[]): boolean {
   // `cd /some/dir` on its own only moves the shell's cursor.
   if (tokens[0] === "cd") return true;
 
@@ -699,16 +699,11 @@ function segmentAllowed(tokens: string[], extraAllow: string[]): boolean {
 
   // `do <command>` — unwrap and check the command itself.
   if (tokens[0] === "do") {
-    return tokens.length > 1 && segmentAllowed(tokens.slice(1), extraAllow);
+    return tokens.length > 1 && segmentAllowed(tokens.slice(1));
   }
 
   // Bare `done` closes a loop and runs nothing.
   if (tokens[0] === "done" && tokens.length === 1) return true;
-
-  const joined = tokens.join(" ");
-  if (extraAllow.some((prefix) => joined === prefix || joined.startsWith(`${prefix} `))) {
-    return true;
-  }
 
   const command = tokens[0]!;
   const allowed = BASH_ALLOWLIST[command];
@@ -735,7 +730,6 @@ function segmentAllowed(tokens: string[], extraAllow: string[]): boolean {
 export function decide(
   toolName: string,
   input: Record<string, unknown>,
-  extraBashAllow: string[],
   yolo = false,
 ): Decision {
   if (READ_ONLY_TOOLS.has(toolName)) {
@@ -750,7 +744,7 @@ export function decide(
 
   if (toolName === "Bash") {
     const command = typeof input.command === "string" ? input.command : "";
-    if (command && isReadOnlyBash(command, extraBashAllow)) {
+    if (command && isReadOnlyBash(command)) {
       return { action: "allow", reason: "read-only shell command" };
     }
     if (yolo) {

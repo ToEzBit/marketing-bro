@@ -125,7 +125,6 @@ async function harness(options: { officeUiPort?: number } = {}): Promise<Harness
     operatorUserId: MEMBER,
     defaultWorkspace: dir,
     defaultModel: "sonnet",
-    extraBashAllow: [],
     approvalTimeoutMs: 1000,
     sessionIdleTimeoutMs: 1000,
     sessionStatePath: join(dir, "sessions.json"),

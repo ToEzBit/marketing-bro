@@ -16,8 +16,6 @@ export type Config = {
   operatorUserId: string;
   defaultWorkspace: string;
   defaultModel: string;
-  /** Extra Bash commands to auto-approve, beyond the built-in read-only set. */
-  extraBashAllow: string[];
   /** How long an approval prompt waits before auto-denying. */
   approvalTimeoutMs: number;
   /** Idle time after which a session's subprocess is reaped (context is resumable). */
@@ -128,7 +126,6 @@ export function loadConfig(): Config {
     operatorUserId,
     defaultWorkspace: expandPath(process.env.DEFAULT_WORKSPACE ?? homedir()),
     defaultModel: process.env.DEFAULT_MODEL?.trim() || "sonnet",
-    extraBashAllow: list("EXTRA_BASH_ALLOW"),
     approvalTimeoutMs: positiveInt("APPROVAL_TIMEOUT_MS", 600_000),
     sessionIdleTimeoutMs: positiveInt("SESSION_IDLE_TIMEOUT_MS", 1_800_000),
     sessionStatePath: expandPath(

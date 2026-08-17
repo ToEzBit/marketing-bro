@@ -1,6 +1,6 @@
 # 0008 — Operator ปิด Approval ครั้งแรกของ browser ใน Task ได้ผ่าน config
 
-Status: accepted (2026-08-04)
+Status: accepted (2026-08-04) · ส่วน `EXTRA_BASH_ALLOW` ถูกยกเลิกโดย [ADR 0010](./0010-yolo-mode-delete-is-the-only-gate.md) (2026-08-18)
 
 ## Context
 
@@ -11,7 +11,8 @@ Status: accepted (2026-08-04)
 - เพิ่ม env `BROWSER_AUTO_APPROVE` (ค่าเริ่มต้น **ปิด**) — เมื่อเปิด Task ปกติจะข้าม Approval ครั้งแรกของ browser: ตัดสินเหมือน Task นั้นถูกอนุมัติ browser ไว้แล้ว จากนั้นเข้าคิว FIFO ตาม ADR 0006 ตามเดิม
 - **สอง tool ที่ทะลุจาก browser มาแตะเครื่อง Host ยังขอ Approval ทุกครั้งเหมือนเดิมไม่ว่า flag จะเปิดหรือปิด**: `browser_file_upload` และ `browser_run_code_unsafe` (เหตุผลเดิมของ ADR 0003 ไม่เปลี่ยน)
 - Scheduled Run ไม่เกี่ยวกับ flag นี้ — ใช้ Grant ตาม ADR 0004 เหมือนเดิม
-- ฝั่งคำสั่งไฟล์ ไม่แก้ policy — ใช้กลไก `EXTRA_BASH_ALLOW` ที่มีอยู่ (Operator เติม `cp,mv,mkdir,date` เองใน `.env` ตามที่ยอมรับความเสี่ยงได้)
+- ~~ฝั่งคำสั่งไฟล์ ไม่แก้ policy — ใช้กลไก `EXTRA_BASH_ALLOW` ที่มีอยู่ (Operator เติม `cp,mv,mkdir,date` เองใน `.env` ตามที่ยอมรับความเสี่ยงได้)~~
+  **ยกเลิกแล้ว (ADR 0010)** — `YOLO_MODE` ทำหน้าที่นี้แทนทั้งหมด และกลไกเดิมถูกถอดออกจากโค้ด
 
 ## Considered Options
 
@@ -22,5 +23,5 @@ Status: accepted (2026-08-04)
 ## Consequences
 
 - ⚠️ เมื่อเปิด flag: **ทุก Member ใน allowlist ใช้ browser (บัญชีที่ล็อกอินค้างของ Operator) ได้ทันทีโดยไม่มีด่านถาม** — วันนี้ไม่มีผลเพราะ operator คนเดียว แต่**ต้องทบทวน flag นี้ก่อนเพิ่มคนใน `ALLOWED_USER_IDS` ทุกครั้ง**
-- `EXTRA_BASH_ALLOW` ที่เติม `cp`/`mv`/`mkdir` เจาะข้อ "เขียนนอก Workspace ต้องขออนุมัติ" ของ ADR 0002 ผ่านทาง Bash (Write/Edit ยังถูกกั้นตามเดิม) — Operator รับความเสี่ยงนี้โดยรู้ตัว บนหลักเดียวกับที่การอ่านไม่จำกัด path อยู่แล้ว
+- ~~`EXTRA_BASH_ALLOW` ที่เติม `cp`/`mv`/`mkdir` เจาะข้อ "เขียนนอก Workspace ต้องขออนุมัติ" ของ ADR 0002 ผ่านทาง Bash~~ **ไม่เกี่ยวแล้ว** — กลไกถูกถอดออกใน ADR 0010 (ข้อสังเกตยังจริงอยู่ในรูปใหม่: `YOLO_MODE` ก็ปล่อยให้ Bash เขียนได้ทุกที่เหมือนกัน แต่เป็นสวิตช์เดียวที่อ่านออกว่าเปิดอะไรไว้ ไม่ใช่รายการคำสั่งที่ต้องไล่ตรวจทีละตัว)
 - README ส่วนความปลอดภัยอัปเดตให้สะท้อนทั้งสองข้อนี้แล้ว

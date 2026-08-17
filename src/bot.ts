@@ -1317,7 +1317,7 @@ export class Bot {
       },
       decide: async (toolName, input, { signal }) => {
         if (!isBrowserTool(toolName)) {
-          return decide(toolName, input, this.config.extraBashAllow, this.config.yoloMode);
+          return decide(toolName, input, this.config.yoloMode);
         }
         const decision = decideBrowser(toolName, {
           // BROWSER_AUTO_APPROVE (ADR 0008): the Operator pre-granted the
