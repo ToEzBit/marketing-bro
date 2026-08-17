@@ -301,7 +301,45 @@ const SUBCOMMAND_GUARDS: Record<string, Record<string, (args: string[]) => boole
  * written. A delete hidden inside `$(…)`, `python -c`, or a shell script the
  * agent wrote a moment ago goes straight through — see ADR 0010 Consequences.
  */
-const DESTRUCTIVE_COMMANDS = new Set(["rm", "rmdir", "unlink", "shred", "srm", "truncate"]);
+const DESTRUCTIVE_COMMANDS: Record<string, DestructiveKind> = {
+  rm: "rm",
+  rmdir: "rmdir",
+  unlink: "unlink",
+  shred: "shred",
+  srm: "shred",
+  truncate: "truncate",
+};
+
+/**
+ * What a destructive segment actually does. The approval prompt turns this
+ * into a sentence a non-developer can act on (`explainTool` in discord/render),
+ * which is why the kind is reported instead of just a boolean: the wording has
+ * to describe the segment that ACTUALLY tripped the gate, not the first one.
+ */
+export type DestructiveKind =
+  | "rm"
+  | "rmdir"
+  | "unlink"
+  | "shred"
+  | "truncate"
+  | "git-clean"
+  | "git-rm"
+  | "git-reset-hard"
+  | "git-checkout-path"
+  | "git-restore"
+  | "git-stash-drop"
+  | "find-delete"
+  | "find-exec"
+  | "rsync-delete"
+  | "dd-overwrite";
+
+export type DestructiveFinding = {
+  /** The chained segment that tripped the gate, as the user wrote it. */
+  segment: string;
+  kind: DestructiveKind;
+  /** Bare operands of that segment — the files and folders it names. */
+  targets: string[];
+};
 
 /**
  * Wrappers that run another command. The real command is the first bare word
@@ -313,35 +351,40 @@ const COMMAND_WRAPPERS = new Set([
 ]);
 
 /** Commands that destroy only under specific flags. Args exclude the command. */
-const DESTRUCTIVE_FLAGS: Record<string, (args: string[]) => boolean> = {
+const DESTRUCTIVE_FLAGS: Record<string, (args: string[]) => DestructiveKind | undefined> = {
   /** `dd of=file` overwrites that file; without `of=` it writes to stdout. */
-  dd: (args) => args.some((arg) => arg.startsWith("of=")),
+  dd: (args) => (args.some((arg) => arg.startsWith("of=")) ? "dd-overwrite" : undefined),
   /** Every `--delete*` variant removes files from the destination. */
-  rsync: (args) => args.some((arg) => arg.startsWith("--delete")),
+  rsync: (args) =>
+    args.some((arg) => arg.startsWith("--delete")) ? "rsync-delete" : undefined,
   /**
    * `-delete` removes matches. The exec predicates run a command this scan
    * never sees, so they ask too — `find … -exec rm {} +` is exactly the shape
    * an accident takes, and plain searches don't use them.
    */
   find: (args) =>
-    args.some((arg) =>
-      ["-delete", "-exec", "-execdir", "-ok", "-okdir"].includes(arg),
-    ),
+    args.includes("-delete")
+      ? "find-delete"
+      : args.some((arg) => ["-exec", "-execdir", "-ok", "-okdir"].includes(arg))
+        ? "find-exec"
+        : undefined,
 };
 
 /** git subcommands that throw away work. Args exclude `git <subcommand>`. */
-const DESTRUCTIVE_GIT: Record<string, (args: string[]) => boolean> = {
+const DESTRUCTIVE_GIT: Record<string, (args: string[]) => DestructiveKind | undefined> = {
   /** Deletes untracked files. `-n`/`--dry-run` only lists them. */
-  clean: (args) => !args.some((arg) => arg === "-n" || arg === "--dry-run"),
+  clean: (args) =>
+    args.some((arg) => arg === "-n" || arg === "--dry-run") ? undefined : "git-clean",
   /** `git rm` deletes; that is the whole subcommand. */
-  rm: () => true,
+  rm: () => "git-rm",
   /** Only `--hard` discards the working tree; soft/mixed keep the files. */
-  reset: (args) => args.includes("--hard"),
+  reset: (args) => (args.includes("--hard") ? "git-reset-hard" : undefined),
   /**
    * `git restore` overwrites the working tree from another source. The one
    * form that does not touch files is `--staged` alone (it just unstages).
    */
-  restore: (args) => !(args.includes("--staged") && !args.includes("--worktree")),
+  restore: (args) =>
+    args.includes("--staged") && !args.includes("--worktree") ? undefined : "git-restore",
   /**
    * `git checkout <path>` overwrites local edits, while `git checkout <branch>`
    * refuses to clobber them. git itself can only tell the two apart by looking
@@ -351,11 +394,15 @@ const DESTRUCTIVE_GIT: Record<string, (args: string[]) => boolean> = {
    */
   checkout: (args) =>
     args.some(
-      (arg) => arg === "--" || arg === "." || arg === "-f" || arg === "--force" ||
+      (arg) =>
+        arg === "--" || arg === "." || arg === "-f" || arg === "--force" ||
         (!arg.startsWith("-") && arg.includes("/")),
-    ),
+    )
+      ? "git-checkout-path"
+      : undefined,
   /** `drop`/`clear` throw stashed work away; `list`/`show`/`pop` do not. */
-  stash: (args) => args[0] === "drop" || args[0] === "clear",
+  stash: (args) =>
+    args[0] === "drop" || args[0] === "clear" ? "git-stash-drop" : undefined,
 };
 
 /** Strips wrappers, flags and `VAR=value` prefixes to find the real command. */
@@ -373,26 +420,68 @@ function realCommand(tokens: string[]): string[] {
 }
 
 /**
- * True when any segment of the command destroys files or uncommitted work.
- * Checks every chained segment, so `npm test && rm -rf dist` still asks.
+ * Flags whose value is the NEXT token, per command. Without this the value
+ * reads as a filename — `truncate -s 0 app.log` would report "0" as a file
+ * about to be wiped, which is exactly the kind of wrong detail that makes an
+ * approval prompt untrustworthy.
  */
-export function isDestructiveBash(command: string): boolean {
-  return command.split(CHAIN_OPERATORS).some((segment) => {
+const VALUE_FLAGS: Record<string, string[]> = {
+  truncate: ["-s", "--size", "-r", "--reference"],
+  shred: ["-n", "--iterations", "-s", "--size"],
+  srm: [],
+};
+
+/** Operands that name a file or folder — flags, their values, and `k=v` are not. */
+function operandsOf(tokens: string[], command = ""): string[] {
+  const valueFlags = VALUE_FLAGS[command] ?? [];
+  const operands: string[] = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]!;
+    if (valueFlags.includes(token)) {
+      index += 1; // skip the value that belongs to this flag
+      continue;
+    }
+    if (token.startsWith("-") || token.includes("=")) continue;
+    operands.push(token);
+  }
+  return operands;
+}
+
+/**
+ * The first segment of the command that destroys files or uncommitted work,
+ * or `undefined` when none does. Every chained segment is checked, so
+ * `npm test && rm -rf dist` is caught — and the segment that actually tripped
+ * the gate is what comes back, so the approval prompt describes the right one.
+ */
+export function findDestructive(command: string): DestructiveFinding | undefined {
+  for (const segment of command.split(CHAIN_OPERATORS)) {
     const tokens = realCommand(tokenize(segment));
     const name = tokens[0];
-    if (name === undefined) return false;
-    if (DESTRUCTIVE_COMMANDS.has(name)) return true;
+    if (name === undefined) continue;
 
-    if (name === "git") {
-      const subcommand = tokens[1];
-      if (subcommand === undefined) return false;
-      const guard = DESTRUCTIVE_GIT[subcommand];
-      return guard ? guard(tokens.slice(2)) : false;
-    }
+    const found = ((): { kind: DestructiveKind; targets: string[] } | undefined => {
+      const direct = DESTRUCTIVE_COMMANDS[name];
+      if (direct) return { kind: direct, targets: operandsOf(tokens.slice(1), name) };
 
-    const guard = DESTRUCTIVE_FLAGS[name];
-    return guard ? guard(tokens.slice(1)) : false;
-  });
+      if (name === "git") {
+        const subcommand = tokens[1];
+        if (subcommand === undefined) return undefined;
+        const kind = DESTRUCTIVE_GIT[subcommand]?.(tokens.slice(2));
+        return kind ? { kind, targets: operandsOf(tokens.slice(2)) } : undefined;
+      }
+
+      const kind = DESTRUCTIVE_FLAGS[name]?.(tokens.slice(1));
+      return kind ? { kind, targets: operandsOf(tokens.slice(1)) } : undefined;
+    })();
+
+    if (found) return { segment: segment.trim(), ...found };
+  }
+  return undefined;
+}
+
+/** True when any segment of the command destroys files or uncommitted work. */
+export function isDestructiveBash(command: string): boolean {
+  return findDestructive(command) !== undefined;
 }
 
 export type Decision =
