@@ -254,10 +254,25 @@ assets/office/
 
 ## 7) สิ่งที่ยังไม่แน่ใจ / ต้องเช็คต่อ
 
+> **ปิดครบแล้ว (2026-08-17, ADR [0009](../adr/0009-office-ui-scope-closed.md))** — เก็บรายการเดิมไว้เป็นบันทึกของงาน
+> research รอบนั้น ไม่ต้องเช็คต่อ ดิสโพสิชันกำกับท้ายแต่ละข้อ:
+> **resolved** = ตอบแล้ว · **moot** = ไม่เกี่ยวแล้วเพราะสุดท้ายส่งมอบด้วย LPC ล้วน · **won't do** = ตัดสินว่าไม่ทำ
+
 - **LimeZu Modern Interiors ชุดเต็ม (v41.x)**: ยืนยันจาก devlog ปี 2021 ว่ามี sit/sleep แต่โครงไฟล์-จำนวนเฟรมของชีตปัจจุบันต้องซื้อ ($1.50+) มาเปิดดูจริงก่อนเขียน offset ใน manifest; และ "4 fully animated characters" ใน free version ไม่ได้ระบุว่ามีท่าอะไรบ้าง ([devlog](https://limezu.itch.io/moderninteriors/devlog/244045/free-version-overview-18042021-update))
+  — **moot**: ไม่ได้ใช้ LimeZu เลย ชุดที่ส่งมอบเป็น LPC ล้วน (`office/assets/default/`)
 - **ข้อความ LICENSE.txt ฉบับเต็มของ LimeZu free version**: หน้าเว็บบอกแค่ "non commercial purposes (more info in the LICENSE.txt)" — ไฟล์จริงอยู่ใน zip ต้องดาวน์โหลดมาอ่าน (บอทเราเป็นเครื่องมือภายในของธุรกิจ อาจถูกตีความเป็น commercial use ได้ — จุดนี้ทำให้ free version ของ LimeZu เสี่ยงเกินกว่าจะเป็น default)
+  — **moot**: ข้อกังวลนี้เองที่ทำให้ตัด LimeZu ออก ไม่มีไฟล์ของแพ็กนี้ใน repo จึงไม่ต้องอ่าน LICENSE.txt
 - **ขนาด sprite ของ Kenney Roguelike Characters**: หน้า kenney.nl ไม่ระบุตัวเลข (ซีรีส์เดียวกันเป็น 16x16 และทวีตของ Kenney เรียกว่า "16x16 Roguelike pack" — <https://x.com/KenneyNL/status/600603088743956480> — แต่ควรวัดไฟล์จริงก่อนใช้)
+  — **moot**: ไม่ได้ใช้ Kenney เลย
 - **License รายแพ็กย่อยของ \[LPC\] Walls / Floors / Upholstery**: หน้าคอลเลกชัน \[LPC\] Interiors ไม่แสดง license รวม ต้องเปิดหน้า entry ของแต่ละแพ็กตอนหยิบมาใช้จริง (คาดว่า CC-BY-SA/GPL เหมือนพี่น้องในชุด แต่ยังไม่ได้ยืนยันรายหน้า)
+  — **resolved**: เปิดหน้า entry รายแพ็กตอนประกอบ tileset จริงแล้ว ผลอยู่ใน
+  [`office/assets/default/CREDITS.md`](../../office/assets/default/CREDITS.md) §2 — Walls = CC-BY-SA 3.0,
+  Floors = CC-BY-SA 4.0, Upholstery = หลาย license ให้เลือก พร้อมข้อความเครดิตที่ต้นทางบังคับให้แนบ
+  (และยกเนื้อ `CREDITS-walls.txt` / `CREDITS-floors.txt` มาไว้ครบใน §5 ของไฟล์นั้น)
 - **ราคา Modern Office - Revamped**: ค่าที่เห็น ($5.00 ลดเหลือ $2.50) เป็น snapshot วันที่ 2026-08-06 — เคยมีข้อมูลมือสองว่าแพ็กนี้เคยฟรี แต่หน้าปัจจุบันเป็น paid แล้ว ราคาน่าจะแกว่งตามเซลของ itch
+  — **moot**: ไม่ได้ซื้อและไม่ได้ใช้ ห้องประกอบจากแพ็ก LPC ฟรีทั้งหมด
 - **จำนวนเฟรมของแอนิเมชัน LPC อื่น ๆ** (run, jump, emote, climb ฯลฯ): ผมวัดเฉพาะ walk/idle/sit/hurt — ตัวอื่นให้วัดจากไฟล์ใน `spritesheets/` ตอน implement (แนวทางเดียวกับ §1.1)
+  — **moot**: ชุดที่ส่งมอบใช้แค่ `walk` / `idle` / `sit` (`sleep` fallback ไป `sit`) ไม่มีท่าอื่นในแผน
 - **สถานะ "waiting-for-Approval" ควรมีท่าเฉพาะไหม**: LPC มี `emote.png` (มี bubble อารมณ์) อาจใช้สื่อ "ยกมือรอ Approval" ได้ — ยังไม่ได้ตรวจเนื้อหาเฟรมของไฟล์นี้
+  — **won't do**: โซน Approval สื่อด้วยตำแหน่งโซน + นาฬิกานับถอยหลังอยู่แล้ว ท่าเฉพาะเป็นงานปรับความสวย
+  ซึ่งปิดรับตาม ADR 0009

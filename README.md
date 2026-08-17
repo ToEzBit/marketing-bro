@@ -183,6 +183,9 @@ public bot ([Commercial Terms](https://www.anthropic.com/legal/commercial-terms)
 - **สลับ art** — วางชุด sprite/tile ของตัวเองใน `office/assets/custom/` (ไม่ commit ลง git)
   พร้อม `manifest.json` แล้ว refresh หน้าเว็บ ไม่มีชุด `custom/` จะ fallback ไปชุด
   `office/assets/default/` ที่มากับ repo โดยไม่ต้องแก้โค้ดเลย
+- **ขอบเขตปิดแล้ว** — ฟีเจอร์นี้ถือว่าเสร็จตาม [ADR 0009](./docs/adr/0009-office-ui-scope-closed.md)
+  รับเฉพาะบั๊กกับการตามสถานะใหม่ของบอท ส่วนข้อจำกัดด้านภาพที่ยอมรับแล้ว 4 ข้อ (ผู้ถือ Browser ยืน,
+  คิวช่องที่ 2 ไม่มีเก้าอี้, stopped/bug ไม่ได้นั่งเก้าอี้, ที่นั่ง lounge ขนาบโซฟา) อยู่ใน ADR นั้นพร้อมเหตุผล
 
 ---
 

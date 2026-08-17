@@ -14,6 +14,7 @@ Discord bot ที่สั่งงาน Claude Agent SDK บนเครื�
   - [0006](./docs/adr/0006-browser-queue.md) — Browser เข้าคิวรอ (FIFO) แทนการปฏิเสธเมื่อไม่ว่าง
   - [0007](./docs/adr/0007-content-pipeline-md-handoff.md) — Content pipeline ส่งงานข้าม Schedule ด้วยไฟล์ md + คนอนุมัติก่อนโพสต์
   - [0008](./docs/adr/0008-operator-preapproved-browser.md) — Operator ปิด Approval ครั้งแรกของ browser ใน Task ได้ผ่าน config (BROWSER_AUTO_APPROVE)
+  - [0009](./docs/adr/0009-office-ui-scope-closed.md) — Office UI ปิดขอบเขตแล้ว: รับเฉพาะบั๊กกับการตามสถานะใหม่ของบอท งานปรับความสวยไม่รับ
 
 ## คำสั่ง
 
