@@ -92,7 +92,7 @@ export function buildCommands(): RESTPostAPIApplicationCommandsJSONBody[] {
         .addStringOption((option) =>
           option
             .setName("at")
-            .setDescription("เวลายิงแบบ 24 ชม. เช่น 08:00 (ใส่เดี่ยว ๆ = ทุกวัน)"),
+            .setDescription("เวลายิงแบบ 24 ชม. เช่น 08:00 หรือหลายเวลา 09:00,13:00,19:00 (ใส่เดี่ยว ๆ = ทุกวัน)"),
         )
         .addStringOption((option) =>
           option
@@ -106,11 +106,6 @@ export function buildCommands(): RESTPostAPIApplicationCommandsJSONBody[] {
         )
         .addStringOption((option) =>
           option.setName("model").setDescription("โมเดลที่ใช้").addChoices(...MODEL_CHOICES),
-        )
-        .addBooleanOption((option) =>
-          option
-            .setName("browser")
-            .setDescription("มอบสิทธิ์ใช้ browser (บัญชีที่ล็อกอินค้าง) ให้งานนี้ตอนรันอัตโนมัติ"),
         )
         .addStringOption(skillOption),
     )
@@ -135,7 +130,7 @@ export function buildCommands(): RESTPostAPIApplicationCommandsJSONBody[] {
         .addStringOption((option) =>
           option
             .setName("at")
-            .setDescription("เวลายิงใหม่แบบ 24 ชม. เช่น 08:00 (ใส่เดี่ยว ๆ = ทุกวัน)"),
+            .setDescription("เวลายิงใหม่ เช่น 08:00 หรือหลายเวลา 09:00,13:00,19:00 (ใส่เดี่ยว ๆ = ทุกวัน)"),
         )
         .addStringOption((option) =>
           option
@@ -147,11 +142,6 @@ export function buildCommands(): RESTPostAPIApplicationCommandsJSONBody[] {
         )
         .addStringOption((option) =>
           option.setName("model").setDescription("เปลี่ยนโมเดล").addChoices(...MODEL_CHOICES),
-        )
-        .addBooleanOption((option) =>
-          option
-            .setName("browser")
-            .setDescription("ให้หรือถอนสิทธิ์ browser ของรอบอัตโนมัติ"),
         )
         .addStringOption((option) =>
           option

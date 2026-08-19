@@ -247,7 +247,6 @@ function scheduleRecord(overrides: Partial<ScheduleRecord> = {}): ScheduleRecord
     workspace: "/tmp/ws",
     model: "sonnet",
     recurrence: { kind: "interval", everyMs: 30 * 60_000 },
-    browserGrant: false,
     paused: false,
     consecutiveFailures: 0,
     createdAt: new Date().toISOString(),
@@ -265,6 +264,25 @@ await check("a missing file loads silently as empty state (ENOENT stays quiet)",
 
   assert.deepEqual(logs, []);
   assert.deepEqual(store.all(), []);
+  assert.equal(await corruptSibling(dir, "schedules.json"), undefined);
+});
+
+await check("a clock recurrence written before ADR 0011 loads with a times list", async () => {
+  const dir = await tempDir();
+  const path = join(dir, "schedules.json");
+  // Exactly what the old code wrote: one hour/minute pair, no `times`.
+  const legacy = { ...scheduleRecord(), recurrence: { kind: "clock", hour: 9, minute: 0, everyDays: 1 } };
+  await writeFile(path, `${JSON.stringify([legacy], null, 2)}\n`, "utf8");
+
+  const store = new ScheduleStore(path);
+  const logs = await captureErrors(() => store.load());
+
+  assert.deepEqual(logs, [], "a migratable record is not a corruption");
+  assert.deepEqual(store.get("s1")?.recurrence, {
+    kind: "clock",
+    times: [{ hour: 9, minute: 0 }],
+    everyDays: 1,
+  });
   assert.equal(await corruptSibling(dir, "schedules.json"), undefined);
 });
 

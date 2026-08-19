@@ -16,6 +16,8 @@ Discord bot ที่สั่งงาน Claude Agent SDK บนเครื�
   - [0008](./docs/adr/0008-operator-preapproved-browser.md) — Operator ปิด Approval ครั้งแรกของ browser ใน Task ได้ผ่าน config (BROWSER_AUTO_APPROVE)
   - [0009](./docs/adr/0009-office-ui-scope-closed.md) — Office UI ปิดขอบเขตแล้ว: รับเฉพาะบั๊กกับการตามสถานะใหม่ของบอท งานปรับความสวยไม่รับ
   - [0010](./docs/adr/0010-yolo-mode-delete-is-the-only-gate.md) — YOLO_MODE: อนุมัติทุกอย่างยกเว้นคำสั่งลบ (และ Scheduled Run ลบไม่ได้เลย)
+  - [0011](./docs/adr/0011-content-calendar-time-driven-publishing.md) — Content Calendar: ขั้นสุดท้ายของ pipeline อิงเวลาที่คนวางไว้ (แก้ ADR 0007 บางส่วน)
+  - [0012](./docs/adr/0012-scheduled-runs-always-have-browser.md) — เลิก browser grant: Scheduled Run ใช้ browser ได้เสมอ (แก้ ADR 0004 บางส่วน)
 
 ## คำสั่ง
 

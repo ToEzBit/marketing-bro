@@ -1,7 +1,12 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
-import { describeRecurrence, nextFireAt, type Recurrence } from "./recurrence.js";
+import {
+  describeRecurrence,
+  nextFireAt,
+  normalizeRecurrence,
+  type Recurrence,
+} from "./recurrence.js";
 import { unbakeSkill } from "./skills.js";
 
 export type ScheduleRecord = {
@@ -24,8 +29,6 @@ export type ScheduleRecord = {
   workspace: string;
   model: string;
   recurrence: Recurrence;
-  /** ADR 0004: whether the creator granted browser access at creation time. */
-  browserGrant: boolean;
   paused: boolean;
   consecutiveFailures: number;
   /** Anchor for interval/every-N-days grids. */
@@ -56,7 +59,7 @@ export class ScheduleStore {
       const parsed = JSON.parse(raw) as unknown;
       if (!Array.isArray(parsed)) throw new Error("state file does not contain a JSON array");
       for (const record of parsed as ScheduleRecord[]) {
-        this.records.set(record.id, normalizeSkill(record));
+        this.records.set(record.id, normalizeSkill(normalizeClock(record)));
       }
     } catch (error) {
       await this.quarantine(raw, error);
@@ -142,6 +145,16 @@ export class ScheduleStore {
 }
 
 /**
+ * Lifts a legacy record's single `hour`/`minute` clock into the list of times
+ * a clock recurrence now holds (ADR 0011). Records already in the new shape
+ * pass through untouched.
+ */
+function normalizeClock(record: ScheduleRecord): ScheduleRecord {
+  const recurrence = normalizeRecurrence(record.recurrence);
+  return recurrence === record.recurrence ? record : { ...record, recurrence };
+}
+
+/**
  * Splits a legacy record's baked-in skill instruction back out into `skill`.
  * Only records that predate the field are touched: once `skill` is set, the
  * prompt is already raw and unbaking it again would eat real prompt text.
@@ -164,7 +177,6 @@ export type ScheduleEdit = {
   recurrence?: Recurrence;
   workspace?: string;
   model?: string;
-  browserGrant?: boolean;
   skill?: string | null;
 };
 
@@ -222,15 +234,6 @@ export function applyScheduleEdit(
   if (edit.model !== undefined && edit.model !== record.model) {
     record.model = edit.model;
     changes.push(`🧠 \`${edit.model}\``);
-  }
-
-  if (edit.browserGrant !== undefined && edit.browserGrant !== record.browserGrant) {
-    record.browserGrant = edit.browserGrant;
-    changes.push(
-      edit.browserGrant
-        ? "🌐 ให้สิทธิ์ browser (ADR 0004)"
-        : "🚫 ถอนสิทธิ์ browser",
-    );
   }
 
   return changes;

@@ -82,5 +82,5 @@ original conversation holds the image context ChatGPT needs:
 ## Use with Schedules
 
 This skill needs the browser — a Schedule that invokes it must be created
-with the browser grant (`/schedule create ... browser:true`), otherwise every
+in a scheduled run (every schedule may drive the browser — ADR 0012), otherwise every
 Run will be denied the moment it touches the browser.

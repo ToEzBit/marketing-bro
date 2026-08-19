@@ -612,30 +612,21 @@ export function decideScheduled(
 }
 
 /**
- * ADR 0004: browser access in a scheduled Run comes from the creation-time
- * grant, not an approval prompt. Upload is part of the grant (posting needs
- * it); `browser_run_code_unsafe` stays shut because it is host-level code
- * execution, which no grant covers. Contention is not decided here — an
- * allowed call stands in the Browser queue (ADR 0006), waiting at most until
- * the schedule's own next round.
+ * ADR 0012: every scheduled Run may drive the browser — the per-schedule
+ * grant is gone. Upload stays allowed (posting needs it);
+ * `browser_run_code_unsafe` stays shut because it is host-level code
+ * execution, which ADR 0004 refuses to any Run. Contention is not decided
+ * here — an allowed call stands in the Browser queue (ADR 0006), waiting at
+ * most until the schedule's own next round.
  */
-export function decideScheduledBrowser(
-  toolName: string,
-  context: { granted: boolean },
-): Decision {
-  if (!context.granted) {
-    return {
-      action: "deny",
-      reason: "schedule นี้ไม่ได้รับสิทธิ์ browser ตอนสร้าง — ทำงานต่อโดยไม่ใช้ browser หรือรายงานแทน",
-    };
-  }
+export function decideScheduledBrowser(toolName: string): Decision {
   if (toolName === BROWSER_UNSAFE_CODE_TOOL) {
     return {
       action: "deny",
       reason: "รันโค้ดระดับ host ผ่าน browser ไม่ได้ใน scheduled run",
     };
   }
-  return { action: "allow", reason: "browser granted at schedule creation" };
+  return { action: "allow", reason: "scheduled runs may drive the browser (ADR 0012)" };
 }
 
 function tokenize(segment: string): string[] {
