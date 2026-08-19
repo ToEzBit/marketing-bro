@@ -34,7 +34,7 @@ async function main(): Promise<void> {
       onSessionId: () => undefined,
       onFatal: (error) => console.error("  FATAL:", error),
       decide: (tool, input) => {
-        const verdict = decide(tool, input, []);
+        const verdict = decide(tool, input);
         console.log(`  policy: ${tool} → ${verdict.action} (${verdict.reason})`);
         return verdict;
       },

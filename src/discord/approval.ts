@@ -7,7 +7,7 @@ import {
   MessageFlags,
 } from "discord.js";
 import type { PermissionResult, PermissionUpdate } from "@anthropic-ai/claude-agent-sdk";
-import { describeTool, truncate, type Postable } from "./render.js";
+import { describeTool, explainTool, truncate, type Postable } from "./render.js";
 
 export type ApprovalRequest = {
   thread: Postable;
@@ -39,20 +39,28 @@ export async function requestApproval(
   const embed = new EmbedBuilder()
     .setColor(0xf5a623)
     .setTitle(`⚠️ ขออนุมัติ: ${request.toolName}`)
-    .setDescription(truncate(request.title ?? detail, 1000))
-    .addFields({ name: "เหตุผล", value: truncate(request.reason, 1000) });
+    // What this does to the host, in plain language — derived by the bot from
+    // the call itself, never from the agent's own words (see render.ts).
+    // It leads the embed because it is the one line a non-developer can act on.
+    .setDescription(`🔎 **บอทอ่านให้ว่า:** ${truncate(explainTool(request.toolName, request.input), 900)}`)
+    .addFields({ name: "เหตุผลที่ต้องถาม", value: truncate(request.reason, 1000) });
 
   if (request.toolName === "Bash" && typeof request.input.command === "string") {
     embed.addFields({
-      name: "คำสั่ง",
+      name: "คำสั่งที่จะรัน",
       value: `\`\`\`sh\n${truncate(request.input.command, 900)}\n\`\`\``,
     });
+  } else if (detail) {
+    embed.addFields({ name: "รายละเอียด", value: truncate(detail, 1000) });
   }
   if (request.blockedPath) {
     embed.addFields({ name: "พาธนอกขอบเขต", value: truncate(request.blockedPath, 1000) });
   }
-  if (request.description) {
-    embed.addFields({ name: "ผลที่จะเกิด", value: truncate(request.description, 1000) });
+  // Claude Code's own wording. Labelled as the agent's so it never reads as
+  // the bot vouching for it — the agent is the party asking for permission.
+  const fromAgent = [request.title, request.description].filter(Boolean).join("\n");
+  if (fromAgent) {
+    embed.addFields({ name: "agent อธิบายเองว่า", value: truncate(fromAgent, 1000) });
   }
   embed.setFooter({
     text: `อนุมัติได้: ${request.approverIds.length} คน · หมดเวลาใน ${Math.round(request.timeoutMs / 60_000)} นาที`,

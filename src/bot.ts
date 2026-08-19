@@ -1316,12 +1316,19 @@ export class Bot {
         if (persist) await this.store.setSessionId(record.threadId, sessionId);
       },
       decide: async (toolName, input, { signal }) => {
-        if (!isBrowserTool(toolName)) return decide(toolName, input, this.config.extraBashAllow);
+        if (!isBrowserTool(toolName)) {
+          return decide(toolName, input, this.config.yoloMode);
+        }
         const decision = decideBrowser(toolName, {
           // BROWSER_AUTO_APPROVE (ADR 0008): the Operator pre-granted the
           // once-per-Task browser Approval; the always-ask tools still ask.
+          // YOLO_MODE (ADR 0010) implies it — "อนุมัติทุกอย่างยกเว้นการลบ"
+          // covers this Approval too, so it is not a second mechanism.
           approved:
-            this.browserApproved.has(record.threadId) || this.config.browserAutoApprove,
+            this.browserApproved.has(record.threadId) ||
+            this.config.browserAutoApprove ||
+            this.config.yoloMode,
+          yolo: this.config.yoloMode,
         });
         if (decision.action !== "allow") return decision;
         // An approved task stands in the Browser queue inside this pending

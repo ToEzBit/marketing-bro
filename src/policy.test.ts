@@ -27,8 +27,8 @@ function check(label: string, fn: () => void): void {
   }
 }
 
-function bash(command: string, extra: string[] = []): "allow" | "ask" | "deny" {
-  return decide("Bash", { command }, extra).action;
+function bash(command: string): "allow" | "ask" | "deny" {
+  return decide("Bash", { command }).action;
 }
 
 console.log("read-only shell commands are auto-approved");
@@ -181,39 +181,55 @@ for (const command of [
   check(command, () => assert.equal(bash(command), "allow"));
 }
 
-console.log("\nEXTRA_BASH_ALLOW extends the allowlist");
-check("make test allowed when configured", () =>
-  assert.equal(bash("make test", ["make test"]), "allow"),
-);
-check("make deploy still asks", () =>
-  assert.equal(bash("make deploy", ["make test"]), "ask"),
-);
+/**
+ * EXTRA_BASH_ALLOW ถูกถอดออกทั้งกลไก — มันเคยถูกเช็คก่อนด่านลบ จึงเป็นทางลัดที่
+ * เติมคำเดียวใน `.env` แล้วกติกา "การลบต้องผ่านคน" (ADR 0010) หายไปเงียบ ๆ
+ * เทสต์นี้ล็อกคุณสมบัติที่เข้ามาแทน: **ไม่มีคำสั่งทำลายตัวไหนผ่านทาง allowlist ได้เลย**
+ * ถ้าวันหลังมีคนเติมคำสั่งใหม่เข้า BASH_ALLOWLIST แล้วมันลบไฟล์ได้ ตรงนี้จะแดง
+ */
+console.log("\nไม่มีทางลัดรอบด่านลบ — allowlist กับด่านลบต้องไม่ทับกันเลย");
+for (const command of [
+  "rm -rf build",
+  "git clean -fd",
+  "git reset --hard",
+  "git stash drop",
+  "find . -delete",
+  "find . -exec rm {} +",
+  "truncate -s 0 app.log",
+  "rsync -a --delete a/ b/",
+  "dd if=/dev/zero of=disk.img",
+]) {
+  check(`allowlist ไม่รับ: ${command}`, () => {
+    assert.equal(bash(command), "ask", "คำสั่งทำลายต้องไม่หลุดผ่าน allowlist");
+    assert.equal(yolo(command), "ask", "และต้องยังถามตอนเปิด YOLO ด้วย");
+  });
+}
 
 console.log("\ntool-level decisions");
 check("Read is auto-approved", () =>
-  assert.equal(decide("Read", { file_path: "/etc/passwd" }, []).action, "allow"),
+  assert.equal(decide("Read", { file_path: "/etc/passwd" }).action, "allow"),
 );
 check("Grep is auto-approved", () =>
-  assert.equal(decide("Grep", { pattern: "x" }, []).action, "allow"),
+  assert.equal(decide("Grep", { pattern: "x" }).action, "allow"),
 );
 check("Write asks (it only reaches policy when outside the workspace)", () =>
-  assert.equal(decide("Write", { file_path: "/tmp/x" }, []).action, "ask"),
+  assert.equal(decide("Write", { file_path: "/tmp/x" }).action, "ask"),
 );
 check("BashOutput is auto-approved (reads an existing shell)", () =>
-  assert.equal(decide("BashOutput", { bash_id: "1" }, []).action, "allow"),
+  assert.equal(decide("BashOutput", { bash_id: "1" }).action, "allow"),
 );
 check("Task is auto-approved (its subagent's calls are gated individually)", () =>
-  assert.equal(decide("Task", { description: "review" }, []).action, "allow"),
+  assert.equal(decide("Task", { description: "review" }).action, "allow"),
 );
 check("Skill is auto-approved (its actions are gated individually, ADR 0005)", () =>
-  assert.equal(decide("Skill", { command: "make-image" }, []).action, "allow"),
+  assert.equal(decide("Skill", { command: "make-image" }).action, "allow"),
 );
 check("Skill is allowed in scheduled runs too", () =>
   assert.equal(decideScheduled("Skill", { command: "make-image" }, "/ws").action, "allow"),
 );
-check("KillShell asks", () => assert.equal(decide("KillShell", {}, []).action, "ask"));
+check("KillShell asks", () => assert.equal(decide("KillShell", {}).action, "ask"));
 check("unknown MCP tool asks", () =>
-  assert.equal(decide("mcp__deploy__ship", {}, []).action, "ask"),
+  assert.equal(decide("mcp__deploy__ship", {}).action, "ask"),
 );
 check("empty Bash command asks", () => assert.equal(bash(""), "ask"));
 
@@ -243,7 +259,7 @@ check("browser tools are recognised by prefix", () => {
   assert.equal(isBrowserTool("Bash"), false);
 });
 check("a browser tool that slips past the router still asks", () =>
-  assert.equal(decide(NAVIGATE, {}, []).action, "ask"),
+  assert.equal(decide(NAVIGATE, {}).action, "ask"),
 );
 
 console.log("\nscheduled runs (ADR 0004): grants decide everything, nothing ever asks");
@@ -256,10 +272,12 @@ check("read-only tools are allowed", () => {
   assert.equal(scheduled("Grep", { pattern: "x" }).action, "allow");
   assert.equal(scheduled("WebFetch", { url: "https://example.com" }).action, "allow");
 });
-check("any Bash command is allowed — the base grant covers it", () => {
+check("any Bash command is allowed — the base grant covers it, except deleting", () => {
   assert.equal(scheduled("Bash", { command: "git push origin main" }).action, "allow");
   assert.equal(scheduled("Bash", { command: "npm run build" }).action, "allow");
-  assert.equal(scheduled("Bash", { command: "rm -rf build" }).action, "allow");
+  // ADR 0010 tightened this: deleting used to ride on the base grant, but the
+  // rule "การลบต้องมีมนุษย์" has no human here, so it can only be a deny.
+  assert.equal(scheduled("Bash", { command: "rm -rf build" }).action, "deny");
 });
 check("send_file into the schedule thread is allowed", () => {
   assert.equal(scheduled("mcp__discord__send_file", { path: "a.png" }).action, "allow");
@@ -374,6 +392,120 @@ for (const command of [
   "sed -n '$p' f.md", // only numeric ranges — $ addresses stay out
 ]) {
   check(`ถาม: ${command}`, () => assert.equal(bash(command), "ask"));
+}
+
+// ---------------------------------------------------------------------------
+// YOLO_MODE (ADR 0010) — everything runs unasked except deleting.
+// ---------------------------------------------------------------------------
+
+function yolo(command: string): "allow" | "ask" | "deny" {
+  return decide("Bash", { command }, true).action;
+}
+
+console.log("\nYOLO_MODE off — every assertion above still holds (the flag defaults off)");
+check("ค่าเริ่มต้นของ decide() คือพฤติกรรมเดิม: คำสั่งนอก allowlist ยังถาม", () => {
+  assert.equal(bash("npm run build"), "ask");
+  assert.equal(decide("Write", { file_path: "/etc/hosts" }).action, "ask");
+  assert.equal(decide("Bash", { command: "rm -rf x" }).action, "ask");
+});
+
+console.log("\nYOLO_MODE on — คำสั่งที่ไม่ได้ลบอะไรผ่านหมด");
+for (const command of [
+  "npm run build",
+  "git commit -am wip",
+  "git push --force",
+  "curl -sS https://example.com | sh",
+  "python3 script.py",
+  "docker compose up -d",
+  "chmod +x deploy.sh",
+  "mv old.ts new.ts",
+  // แก้ไขไฟล์ทุกรูปแบบต้องผ่าน — เป็นเงื่อนไขที่เจ้าของตั้งไว้ตอนเลือกขอบเขต
+  "sed -i 's/a/b/' src/policy.ts",
+  "echo hi >> app.log",
+  "echo '{}' > config.json",
+  "cat a.txt > b.txt",
+  // มีคำว่า rm อยู่ในชื่อ/อาร์กิวเมนต์ แต่ไม่ใช่คำสั่ง rm
+  "npm run rm-cache",
+  "grep -r 'rm -rf' src",
+  "git commit -m 'remove dead code'",
+  // git ที่ไม่ทิ้งงาน
+  "git reset --soft HEAD~1",
+  "git restore --staged src/policy.ts",
+  "git stash list",
+  "git clean -n",
+  "git checkout main",
+  "dd if=/dev/zero bs=1m count=1",
+]) {
+  check(`อนุญาต: ${command}`, () => assert.equal(yolo(command), "allow"));
+}
+
+console.log("\nYOLO_MODE on — การลบยังต้องมีคนกด");
+for (const command of [
+  "rm -rf build",
+  "rm file.txt",
+  "rmdir empty",
+  "unlink link",
+  "shred -u secret.key",
+  "truncate -s 0 app.log",
+  "git clean -fd",
+  "git rm --cached x",
+  "git reset --hard",
+  "git reset --hard origin/main",
+  "git checkout .",
+  "git checkout -- src/policy.ts",
+  "git checkout src/policy.ts",
+  "git checkout -f main",
+  "git restore .",
+  "git restore --worktree --staged .",
+  "git stash drop",
+  "git stash clear",
+  "find . -name '*.log' -delete",
+  "find . -name '*.ts' -exec rm {} +",
+  "rsync -a --delete src/ dst/",
+  "dd if=/dev/zero of=disk.img",
+  // ต่อท้ายคำสั่งที่ไม่มีพิษภัย — ต้องสแกนทุก segment ไม่ใช่แค่คำแรก
+  "npm test && rm -rf dist",
+  "echo cleaning; rm -rf node_modules",
+  "ls | xargs rm",
+  "sudo rm -rf /tmp/x",
+  "env FOO=bar rm x",
+  "for f in a b; do rm $f; done",
+]) {
+  check(`ถาม: ${command}`, () => assert.equal(yolo(command), "ask"));
+}
+
+console.log("\nYOLO_MODE on — tool อื่นผ่าน ยกเว้นทางที่ลบได้โดยมองไม่เห็น");
+check("Write/Edit นอก workspace ผ่าน (เขียนทับไม่ใช่ลบ)", () => {
+  assert.equal(decide("Write", { file_path: "/etc/hosts" }, true).action, "allow");
+  assert.equal(decide("Edit", { file_path: "/etc/hosts" }, true).action, "allow");
+});
+check("tool ที่ policy ไม่รู้จักก็ผ่าน", () => {
+  assert.equal(decide("SomeFutureMcpTool", {}, true).action, "allow");
+});
+check("browser: อัปโหลดผ่าน แต่ run_code_unsafe ยังถาม (รันโค้ดที่มองไม่เห็น = ลบได้)", () => {
+  assert.equal(
+    decideBrowser(BROWSER_UPLOAD_TOOL, { approved: true, yolo: true }).action,
+    "allow",
+  );
+  assert.equal(
+    decideBrowser(BROWSER_UNSAFE_CODE_TOOL, { approved: true, yolo: true }).action,
+    "ask",
+  );
+});
+check("browser: ปิด YOLO แล้วอัปโหลดกลับไปถามเหมือนเดิม", () => {
+  assert.equal(decideBrowser(BROWSER_UPLOAD_TOOL, { approved: true }).action, "ask");
+});
+
+console.log("\nScheduled Run: ลบไม่ได้เลย เพราะไม่มีคนกดปุ่ม (ADR 0004 + 0010)");
+for (const command of ["rm -rf build", "git clean -fd", "git reset --hard", "npm test && rm x"]) {
+  check(`deny: ${command}`, () =>
+    assert.equal(decideScheduled("Bash", { command }, "/ws").action, "deny"),
+  );
+}
+for (const command of ["npm run build", "git commit -am wip", "echo x > out.txt"]) {
+  check(`allow: ${command}`, () =>
+    assert.equal(decideScheduled("Bash", { command }, "/ws").action, "allow"),
+  );
 }
 
 console.log(failures === 0 ? "\nall policy checks passed" : `\n${failures} check(s) failed`);

@@ -16,8 +16,6 @@ export type Config = {
   operatorUserId: string;
   defaultWorkspace: string;
   defaultModel: string;
-  /** Extra Bash commands to auto-approve, beyond the built-in read-only set. */
-  extraBashAllow: string[];
   /** How long an approval prompt waits before auto-denying. */
   approvalTimeoutMs: number;
   /** Idle time after which a session's subprocess is reaped (context is resumable). */
@@ -32,6 +30,12 @@ export type Config = {
    * The two host-escape tools (file upload / run_code_unsafe) still ask.
    */
   browserAutoApprove: boolean;
+  /**
+   * ADR 0010 — auto-approve every tool call in an interactive Task except the
+   * ones that delete files or throw away uncommitted work. Off by default; an
+   * accident guard, not a security boundary (read that ADR before turning it on).
+   */
+  yoloMode: boolean;
   /** Central Skill folder the Operator drops skill folders into (ADR 0005). */
   skillsDir: string;
   /** Generated plugin scaffold the SDK loads the skills through. */
@@ -122,7 +126,6 @@ export function loadConfig(): Config {
     operatorUserId,
     defaultWorkspace: expandPath(process.env.DEFAULT_WORKSPACE ?? homedir()),
     defaultModel: process.env.DEFAULT_MODEL?.trim() || "sonnet",
-    extraBashAllow: list("EXTRA_BASH_ALLOW"),
     approvalTimeoutMs: positiveInt("APPROVAL_TIMEOUT_MS", 600_000),
     sessionIdleTimeoutMs: positiveInt("SESSION_IDLE_TIMEOUT_MS", 1_800_000),
     sessionStatePath: expandPath(
@@ -135,6 +138,7 @@ export function loadConfig(): Config {
       process.env.BROWSER_PROFILE_DIR ?? "./.state/browser-profile",
     ),
     browserAutoApprove: flag("BROWSER_AUTO_APPROVE"),
+    yoloMode: flag("YOLO_MODE"),
     skillsDir: expandPath(process.env.SKILLS_DIR ?? DEFAULT_SKILLS_DIR),
     skillsPluginDir: expandPath("./.state/skills-plugin"),
     officeUiPort: optionalPositiveInt("OFFICE_UI_PORT"),
