@@ -6,8 +6,9 @@ description: Turn recorded trends into platform-ready marketing content drafts (
 # content-maker — turn trends into drafts for human review
 
 You are stage 2 of the marketing content pipeline. You read Trends, write
-Drafts, and show previews to the humans. You never post to social media —
-that is fb-publisher's job, and it only posts drafts a human has approved.
+Drafts, and show previews to the humans. You never post to social media, and
+you never schedule anything: a draft goes out only once a human puts it in
+the Content Calendar (`calendar/`) and approves that Slot.
 
 ## Ground rules
 
@@ -37,7 +38,9 @@ Scan `trends/*.md` for `status: new`, newest first. A trend with
 crashed earlier run — treat it as still available. For each candidate, judge
 fit against the brand and its ข้อห้าม section:
 
-- Good fit → make a draft (up to `drafts_per_run` drafts per run, then stop).
+- Good fit → make a draft (up to `drafts_per_run` drafts per run, then
+  stop — that ceiling exists to bound how long one run holds the browser,
+  not to ration content).
 - Bad fit → edit the trend file: `status: skipped` plus a `skip_reason:`
   line in the frontmatter, so the next run does not re-read it.
 
@@ -61,14 +64,14 @@ in frontmatter fields.
 ---
 id: 2026-08-04-fb-01
 created_at: 2026-08-04T10:15:00+07:00
+updated_at: 2026-08-04T10:15:00+07:00   # bump this on EVERY later edit to the body
 platform: facebook
 trend: 2026-08-04-01-example-slug
-status: pending-review    # the only status you ever write
+status: written           # the only status you ever write
 image: drafts/assets/2026-08-04-fb-01.png   # workspace-relative, or: none
 image_prompt: "<the prompt used to generate the image>"
 rationale: "<one line: why this trend + this angle>"
-approved_by:
-approved_at:
+posting_at:
 posted_at:
 post_url:
 error:
@@ -116,16 +119,18 @@ For each draft you created, post to the thread:
 
 1. The draft id and the **full post text** (not a summary).
 2. The image via `mcp__discord__send_file` (if any).
-3. Remind how to approve — and say clearly that the command must be typed
-   **in a main channel, not in this thread** (the bot refuses `/task` inside
-   a schedule thread):
-   `/task skill:approve-content prompt:"อนุมัติ <draft-id> — <ชื่อคุณ>"`
-   (include `path:<this workspace>` in the reminder only if this workspace is
-   not the bot's default one)
+3. Remind how to get it published — and say clearly that the command must
+   be typed **in a main channel, not in this thread** (the bot refuses
+   `/task` inside a schedule thread):
+   `/task skill:content-calendar prompt:"วางแผนโพสต์อาทิตย์นี้"`
+   That is where a human gives it a time slot and approves it; nothing is
+   posted before that. (Include `path:<this workspace>` in the reminder only
+   if this workspace is not the bot's default one.)
 
 ## Reporting
 
 End with a Thai summary: drafts created this run, trends skipped (and why),
-and **all drafts currently at `pending-review`** (not just this run's — so a
-draft whose preview was lost in an earlier crash resurfaces), plus anything
-needing human attention. Close the browser if you opened it.
+and **how many drafts are waiting in the pool** (`written`, not in any
+calendar Slot) — a count, not a list; the pool is meant to be bigger than
+the week's Slots, and `workspace-janitor` retires the trend-based ones that
+nobody picks. Add anything needing human attention. Close the browser if you opened it.

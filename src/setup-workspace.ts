@@ -17,7 +17,7 @@ import { expandPath } from "./config.js";
 const REPO_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const TEMPLATE_ROOT = join(REPO_ROOT, "templates", "marketing-workspace");
 /** Folders the pipeline writes into — empty at scaffold time, so not in templates. */
-const EMPTY_DIRS = ["trends", "drafts/assets", "archive"];
+const EMPTY_DIRS = ["trends", "drafts/assets", "calendar", "archive"];
 
 async function listTemplateFiles(dir: string): Promise<string[]> {
   const out: string[] = [];
@@ -94,9 +94,12 @@ async function main(): Promise<void> {
   console.log(`\nขั้นต่อไป (รายละเอียดใน ${displayPath}/README.md):`);
   console.log("  1. เติมไฟล์ใน brand/ กับ config/pipeline.md แล้วเปลี่ยน status: unfilled → ready");
   console.log("  2. npm run browser:login  — ล็อกอิน Facebook + เว็บ gen รูป (แล้วปิดหน้าต่าง)");
-  console.log("  3. สร้าง Schedule 3 อันในห้องหลักของ Discord เช่น:");
+  console.log("  3. สร้าง Schedule 4 อันในห้องหลักของ Discord เช่น:");
   console.log(
-    '     /schedule create prompt:"ส่องเทรนด์ประจำวัน" skill:trend-scout at:08:00 browser:true',
+    '     /schedule create prompt:"ส่องเทรนด์ประจำวัน" skill:trend-scout at:08:00',
+  );
+  console.log(
+    '     /schedule create prompt:"โพสต์ตามปฏิทิน" skill:fb-publisher at:09:30,13:30,19:30',
   );
   console.log(
     "     (ไม่ต้องใส่ path: — โฟลเดอร์นี้คือ DEFAULT_WORKSPACE ของบอทอยู่แล้ว)",

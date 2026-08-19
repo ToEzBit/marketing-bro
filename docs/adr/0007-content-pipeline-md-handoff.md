@@ -1,6 +1,8 @@
 # 0007 — Content pipeline: ส่งงานข้าม Schedule ด้วยไฟล์ md + คนอนุมัติก่อนโพสต์
 
-Status: accepted (2026-08-03)
+Status: accepted (2026-08-03) · แก้ไขบางส่วนโดย [ADR 0011](./0011-content-calendar-time-driven-publishing.md) (2026-08-19)
+— ขั้น Draft → โพสต์ ย้ายไปอิงเวลาที่คนวางไว้ใน Content Calendar, สถานะ `approved` ในไฟล์ Draft
+และ skill `approve-content` ถูกแทนที่, `max_posts_per_day` เลิกเป็นเพดานตอนรัน
 
 ## Context
 

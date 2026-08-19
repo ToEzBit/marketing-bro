@@ -652,14 +652,14 @@ export class Bot {
         "",
         "🧵 `/task prompt:…` — สั่งงานหลัก: บอทเปิดเธรดให้ (1 งาน = 1 เธรด) พิมพ์ในเธรดเพื่อคุยต่อ/สั่งเพิ่มได้เรื่อย ๆ — พิมพ์ระหว่างที่กำลังทำงาน = แทรกคำสั่ง บอทติด 👀 ให้",
         "❓ `/ask prompt:…` — คำถามสั้น ๆ ตอบในห้องเดิม ไม่เปิดเธรด ไม่เก็บบริบท อ่าน/ค้นได้อย่างเดียว แก้เครื่องไม่ได้",
-        "⏰ `/schedule create prompt:… every:2h` (หรือ `at:08:00`) — งานรันซ้ำเองตามรอบ · จัดการด้วย `/schedule list | run | edit | pause | resume | delete` — pause คือเบรกฉุกเฉิน กดได้ทุกคน",
-        "✏️ `/schedule edit id:… [prompt:…] [every:…] [model:…] [browser:…]` — แก้ของเดิมโดยไม่เสียเธรดและประวัติ · ช่องที่ไม่ระบุคงค่าเดิมไว้ · มีผลตั้งแต่รอบถัดไป",
+        "⏰ `/schedule create prompt:… every:2h` (หรือ `at:08:00` / `at:09:00,13:00,19:00`) — งานรันซ้ำเองตามรอบ · จัดการด้วย `/schedule list | run | edit | pause | resume | delete` — pause คือเบรกฉุกเฉิน กดได้ทุกคน",
+        "✏️ `/schedule edit id:… [prompt:…] [every:…] [at:…] [model:…]` — แก้ของเดิมโดยไม่เสียเธรดและประวัติ · ช่องที่ไม่ระบุคงค่าเดิมไว้ · มีผลตั้งแต่รอบถัดไป",
         "🛑 `/stop` — หยุดงานในเธรดนั้น · 📊 `/status` — ดูงานที่รันอยู่ รอบ schedule ที่กำลังทำ และคิว browser",
         "",
         "ตัวเลือกเสริมของ `/task` และ `/schedule create`:",
         "🧩 `skill:` เลือกสูตรงานสำเร็จรูป (พิมพ์เพื่อค้นหา · ไม่ระบุ = agent เลือกเอง) · 📂 `path:` โฟลเดอร์ทำงาน (ไม่ระบุ = workspace กลาง) · 🧠 `model:` โมเดล",
         "",
-        "🔐 คำสั่งเสี่ยง (เช่น ลบไฟล์ หรือใช้ browser ครั้งแรกของงาน) จะขึ้นปุ่มขอ Approval ในเธรด — คนสั่งงานหรือ Operator เป็นคนกด ส่วน Schedule ไม่ถามตอนรัน: ใช้สิทธิ์ที่มอบไว้ตอนสร้างแทน (เช่น `browser:true`)",
+        "🔐 คำสั่งเสี่ยง (เช่น ลบไฟล์ หรือใช้ browser ครั้งแรกของงาน) จะขึ้นปุ่มขอ Approval ในเธรด — คนสั่งงานหรือ Operator เป็นคนกด ส่วน Schedule ไม่ถามตอนรัน: อ่าน/เขียนใน workspace, Bash และ browser ผ่านหมด ยกเว้นเขียนนอก workspace กับรันโค้ดระดับ host (ADR 0004 + 0012)",
       ].join("\n"),
       flags: MessageFlags.Ephemeral,
     });
@@ -729,7 +729,6 @@ export class Bot {
       return;
     }
 
-    const browserGrant = interaction.options.getBoolean("browser") ?? false;
     const model = interaction.options.getString("model") ?? this.config.defaultModel;
     const picked = await this.resolveSkill(interaction);
     if (!picked.ok) return;
@@ -746,7 +745,6 @@ export class Bot {
       workspace: workspace.path,
       model,
       recurrence: parsed.recurrence,
-      browserGrant,
       paused: false,
       consecutiveFailures: 0,
       createdAt: now.toISOString(),
@@ -769,9 +767,7 @@ export class Bot {
         `📂 \`${record.workspace}\``,
         `🧠 \`${record.model}\``,
         ...(picked.skill ? [`🧩 สกิล \`${picked.skill}\``] : []),
-        browserGrant
-          ? "🌐 ได้สิทธิ์ browser — รอบอัตโนมัติใช้บัญชีที่ล็อกอินค้างได้โดยไม่ถามใคร (ADR 0004)"
-          : "🚫 ไม่ได้สิทธิ์ browser",
+        "🌐 รอบอัตโนมัติใช้ browser (บัญชีที่ล็อกอินค้าง) ได้โดยไม่ถามใคร — ทุก schedule เป็นแบบนี้ (ADR 0012)",
         "",
         `ทุกรอบรันในเธรดนี้ · หยุดฉุกเฉินได้ทุกคนด้วย \`/schedule pause id:${record.id}\``,
       ].join("\n"),
@@ -795,7 +791,7 @@ export class Bot {
     // Every option is read as present-or-absent, never through the `?? default`
     // that creation uses: there absence means "use the default", here it means
     // "leave this alone". Sharing that shape would let `/schedule edit
-    // prompt:…` quietly revoke a browser grant and reset model and workspace.
+    // prompt:…` quietly reset model and workspace to their defaults.
     const edit: ScheduleEdit = {};
 
     const prompt = interaction.options.getString("prompt");
@@ -833,9 +829,6 @@ export class Bot {
     const model = interaction.options.getString("model");
     if (model !== null) edit.model = model;
 
-    const browser = interaction.options.getBoolean("browser");
-    if (browser !== null) edit.browserGrant = browser;
-
     const picked = await this.resolveSkillEdit(interaction);
     if (!picked.ok) return;
     if (picked.skill !== undefined) edit.skill = picked.skill;
@@ -843,7 +836,7 @@ export class Bot {
     if (Object.keys(edit).length === 0) {
       await interaction.reply({
         content:
-          "ไม่ได้ระบุอะไรให้แก้ — ใส่อย่างน้อยหนึ่งช่อง เช่น `prompt:`, `every:` หรือ `browser:`",
+          "ไม่ได้ระบุอะไรให้แก้ — ใส่อย่างน้อยหนึ่งช่อง เช่น `prompt:`, `every:` หรือ `at:`",
         flags: MessageFlags.Ephemeral,
       });
       return;
@@ -872,7 +865,7 @@ export class Bot {
 
     await interaction.reply(summary);
     // The schedule's thread is where its history lives, so a change to what it
-    // will do next — a browser grant above all — is recorded there as well.
+    // will do next is recorded there as well.
     try {
       const thread = await this.fetchScheduleThread(record);
       if (thread.id !== interaction.channelId) await thread.send(summary);
@@ -889,9 +882,8 @@ export class Bot {
     }
     const lines = records.map((record) => {
       const state = record.paused ? "⏸️" : this.scheduler.isRunning(record.id) ? "🟢" : "⚪";
-      const browser = record.browserGrant ? " · 🌐" : "";
       const next = record.paused ? "หยุดอยู่" : `ถัดไป ${formatLocal(record.nextRunAt)}`;
-      return `${state} \`${record.id}\` ${describeRecurrence(record.recurrence)} · ${next} · <#${record.threadId}> · <@${record.ownerId}>${browser}`;
+      return `${state} \`${record.id}\` ${describeRecurrence(record.recurrence)} · ${next} · <#${record.threadId}> · <@${record.ownerId}>`;
     });
     await interaction.reply({
       content: [`**Schedule ทั้งหมด ${records.length} รายการ**`, ...lines].join("\n"),
@@ -1108,18 +1100,14 @@ export class Bot {
         model: record.model,
         oauthToken: this.config.oauthToken,
         ...this.refreshSkillsPlugin(),
-        ...(record.browserGrant
-          ? {
-              browserServer: {
-                type: "stdio",
-                command: process.execPath,
-                args: playwrightMcpArgs({
-                  profileDir: this.config.browserProfileDir,
-                  outputDir: join(record.workspace, ".browser-output"),
-                }),
-              },
-            }
-          : {}),
+        browserServer: {
+          type: "stdio",
+          command: process.execPath,
+          args: playwrightMcpArgs({
+            profileDir: this.config.browserProfileDir,
+            outputDir: join(record.workspace, ".browser-output"),
+          }),
+        },
       },
       {
         onText: (text) => reporter.say(text),
@@ -1128,7 +1116,7 @@ export class Bot {
         onSessionId: () => undefined,
         decide: async (toolName, input, { signal }) => {
           if (!isBrowserTool(toolName)) return decideScheduled(toolName, input, record.workspace);
-          const decision = decideScheduledBrowser(toolName, { granted: record.browserGrant });
+          const decision = decideScheduledBrowser(toolName);
           if (decision.action !== "allow") return decision;
           // Stand in the Browser queue, at most until this schedule's own
           // next round (ADR 0006). The deadline backs off a little before the

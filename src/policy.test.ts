@@ -314,28 +314,20 @@ check("no scheduled decision is ever 'ask'", () => {
   }
 });
 
-console.log("\nscheduled browser: the grant decides, host-escape stays shut");
-const granted = { granted: true };
-const notGranted = { granted: false };
+console.log("\nscheduled browser: always open, host-escape stays shut (ADR 0012)");
 
-check("without the grant every browser tool is denied", () => {
-  assert.equal(decideScheduledBrowser(NAVIGATE, notGranted).action, "deny");
-  assert.equal(decideScheduledBrowser(BROWSER_UPLOAD_TOOL, notGranted).action, "deny");
-});
-check("with the grant, browser use is allowed with no approval", () =>
-  assert.equal(decideScheduledBrowser(NAVIGATE, granted).action, "allow"),
+check("a run drives the browser with no grant and no approval", () =>
+  assert.equal(decideScheduledBrowser(NAVIGATE).action, "allow"),
 );
-check("file upload is allowed under the grant (posting needs it)", () =>
-  assert.equal(decideScheduledBrowser(BROWSER_UPLOAD_TOOL, granted).action, "allow"),
+check("file upload is allowed (posting needs it)", () =>
+  assert.equal(decideScheduledBrowser(BROWSER_UPLOAD_TOOL).action, "allow"),
 );
-check("run_code_unsafe is denied even with the grant (host-level code)", () =>
-  assert.equal(decideScheduledBrowser(BROWSER_UNSAFE_CODE_TOOL, granted).action, "deny"),
+check("run_code_unsafe is still denied — host-level code is refused to every run", () =>
+  assert.equal(decideScheduledBrowser(BROWSER_UNSAFE_CODE_TOOL).action, "deny"),
 );
 check("no scheduled browser decision is ever 'ask'", () => {
-  for (const context of [granted, notGranted]) {
-    for (const tool of [NAVIGATE, BROWSER_UPLOAD_TOOL, BROWSER_UNSAFE_CODE_TOOL]) {
-      assert.notEqual(decideScheduledBrowser(tool, context).action, "ask");
-    }
+  for (const tool of [NAVIGATE, BROWSER_UPLOAD_TOOL, BROWSER_UNSAFE_CODE_TOOL]) {
+    assert.notEqual(decideScheduledBrowser(tool).action, "ask");
   }
 });
 

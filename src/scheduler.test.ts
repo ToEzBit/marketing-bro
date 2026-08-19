@@ -82,7 +82,6 @@ async function harness(overrides: Partial<ScheduleRecord> = {}): Promise<Harness
     workspace: "/tmp/ws",
     model: "sonnet",
     recurrence: { kind: "interval", everyMs: 30 * MIN },
-    browserGrant: false,
     paused: false,
     consecutiveFailures: 0,
     createdAt: T0.toISOString(),
@@ -309,7 +308,7 @@ await check("an omitted field is left as it is, never reset to a default", async
   const h = await harness({
     workspace: "/tmp/marketing",
     model: "opus",
-    browserGrant: true,
+    skill: "trend-scout",
   });
   const changes = applyScheduleEdit(h.record, { prompt: "งานใหม่" }, T0);
 
@@ -317,9 +316,9 @@ await check("an omitted field is left as it is, never reset to a default", async
   // now does — not merely that something about it changed.
   assert.deepEqual(changes, ["📝 prompt ใหม่: งานใหม่"]);
   assert.equal(h.record.prompt, "งานใหม่");
-  // The fields the caller never mentioned — a grant reset here would be a
-  // silent permission change (ADR 0004).
-  assert.equal(h.record.browserGrant, true);
+  // The fields the caller never mentioned — resetting any of them here would
+  // be a silent change nobody asked for.
+  assert.equal(h.record.skill, "trend-scout");
   assert.equal(h.record.model, "opus");
   assert.equal(h.record.workspace, "/tmp/marketing");
   assert.deepEqual(h.record.recurrence, { kind: "interval", everyMs: 30 * MIN });
@@ -341,7 +340,7 @@ await check("a new recurrence recomputes nextRunAt off the creation anchor", asy
 
 await check("editing a paused schedule leaves it paused and its failures counted", async () => {
   const h = await harness({ paused: true, consecutiveFailures: 2 });
-  applyScheduleEdit(h.record, { model: "haiku", browserGrant: true }, T0);
+  applyScheduleEdit(h.record, { model: "haiku" }, T0);
 
   // Waking a schedule and forgiving its failures belong to /schedule resume.
   assert.equal(h.record.paused, true);
@@ -350,10 +349,10 @@ await check("editing a paused schedule leaves it paused and its failures counted
 });
 
 await check("values identical to the current ones report no change", async () => {
-  const h = await harness({ model: "sonnet", browserGrant: false });
+  const h = await harness({ model: "sonnet" });
   const changes = applyScheduleEdit(
     h.record,
-    { model: "sonnet", browserGrant: false, recurrence: { kind: "interval", everyMs: 30 * MIN } },
+    { model: "sonnet", recurrence: { kind: "interval", everyMs: 30 * MIN } },
     T0,
   );
   assert.deepEqual(changes, []);
