@@ -40,10 +40,12 @@ two apart.
 ## Before you start
 
 1. Read `brand/competitors.md` — the roster. Each row gives a `slug`, a name,
-   a page/shop URL, and what to watch for that competitor.
-2. Read the existing dossiers in `competitors/` for the slugs you are about to
+   a **tier**, a page/shop URL, and what to watch for that row.
+2. **If the prompt names a tier, check only the rows of that tier.** No tier
+   named = every row. Tiers exist because the rounds have different cadences.
+3. Read the existing dossiers in `competitors/` for the slugs you are about to
    check. You cannot report "what changed" without knowing what you had.
-3. Skip roster rows that are commented out with a leading `#`.
+4. Skip roster rows that are commented out with a leading `#`.
 
 ## Checking one competitor
 
@@ -59,6 +61,19 @@ For each one, look for:
 - **มุมที่เขาใช้ขาย** — โพสต์ล่าสุด 3-5 ชิ้นเน้นเรื่องอะไร ฟอร์แมตไหน (คลิป รีวิว ก่อน-หลัง)
 - **สัญญาณความเคลื่อนไหว** — เพจเงียบไปนานไหม เริ่มยิงแอดหรือเปล่า มีร้านใหม่ในช่องทางอื่นไหม
 - plus whatever that row's "ต้องดูอะไรเป็นพิเศษ" column asks for
+
+What matters depends on the row's tier:
+
+- **`direct`** — คนที่แย่งลูกค้าเราวันนี้ The sharp end is **price and offer**:
+  a number that moved, a promo that started or ended, a cheaper SKU appearing.
+- **`reference`** — เก็บไว้ดูแนวทางสินค้า Price barely matters here; what matters
+  is **product and packaging moves**: a new tier, a feature they now lead with,
+  a shift between one-time and subscription pricing, a repositioning of who the
+  product is for. Report these as ideas worth considering, never as threats.
+- **`market`** — ไม่ใช่ราย แต่เป็นสภาพตลาด (หน้าค้นหา/หมวดสินค้า) There is no
+  single owner to profile: record the **price range** you can see today, roughly
+  how many sellers are competing, and anything that shifts the floor. Compare
+  ranges, not individual listings — listings churn daily and that is noise.
 
 Compare each against the dossier. **A difference is only a change if you can
 point at what it was before.** A field that was `unknown` last time and has a
