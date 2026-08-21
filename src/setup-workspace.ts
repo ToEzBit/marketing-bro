@@ -17,7 +17,7 @@ import { expandPath } from "./config.js";
 const REPO_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const TEMPLATE_ROOT = join(REPO_ROOT, "templates", "marketing-workspace");
 /** Folders the pipeline writes into — empty at scaffold time, so not in templates. */
-const EMPTY_DIRS = ["trends", "drafts/assets", "calendar", "archive"];
+const EMPTY_DIRS = ["trends", "drafts/assets", "calendar", "competitors", "archive"];
 
 async function listTemplateFiles(dir: string): Promise<string[]> {
   const out: string[] = [];
