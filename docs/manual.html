@@ -1,0 +1,667 @@
+<meta charset="utf-8">
+<title>คู่มือบอทการตลาด</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Thai:wght@400;500;600&family=Trirong:wght@500;600&display=swap">
+
+<style>
+:root{
+  --ground:#F4F2F5;
+  --surface:#FFFFFF;
+  --surface-2:#FAF7FB;
+  --ink:#1B1720;
+  --ink-soft:#615A6B;
+  --ink-faint:#8C8496;
+  --rule:#E4DEE7;
+  --rule-strong:#CFC6D5;
+  --accent:#C41E63;
+  --accent-ink:#8E1246;
+  --accent-tint:#FBE9F1;
+  --warn:#9A5B08;
+  --warn-tint:#FAF0DE;
+  --danger:#B22A25;
+  --danger-tint:#FBE9E7;
+  --ok:#166F55;
+  --ok-tint:#E2F2EB;
+  --code-bg:#F1EDF3;
+  --shadow:0 1px 2px rgba(27,23,32,.06), 0 8px 24px -16px rgba(27,23,32,.25);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#151219;
+    --surface:#1D1922;
+    --surface-2:#221D2B;
+    --ink:#EFEAF2;
+    --ink-soft:#A79FB1;
+    --ink-faint:#867E91;
+    --rule:#332C3B;
+    --rule-strong:#463D51;
+    --accent:#FF87AF;
+    --accent-ink:#FFB3CB;
+    --accent-tint:#3A1B2A;
+    --warn:#E3A85F;
+    --warn-tint:#33271A;
+    --danger:#F28B82;
+    --danger-tint:#3A211F;
+    --ok:#66C9A4;
+    --ok-tint:#16302A;
+    --code-bg:#26212E;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.8);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#151219;
+  --surface:#1D1922;
+  --surface-2:#221D2B;
+  --ink:#EFEAF2;
+  --ink-soft:#A79FB1;
+  --ink-faint:#867E91;
+  --rule:#332C3B;
+  --rule-strong:#463D51;
+  --accent:#FF87AF;
+  --accent-ink:#FFB3CB;
+  --accent-tint:#3A1B2A;
+  --warn:#E3A85F;
+  --warn-tint:#33271A;
+  --danger:#F28B82;
+  --danger-tint:#3A211F;
+  --ok:#66C9A4;
+  --ok-tint:#16302A;
+  --code-bg:#26212E;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.8);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0;
+  background:var(--ground);
+  color:var(--ink);
+  font-family:"IBM Plex Sans Thai","Noto Sans Thai",system-ui,-apple-system,sans-serif;
+  font-size:17px;
+  line-height:1.85;
+  -webkit-font-smoothing:antialiased;
+}
+code,kbd,.mono{font-family:"IBM Plex Mono","IBM Plex Sans Thai",ui-monospace,SFMono-Regular,Menlo,monospace}
+
+/* ---------- layout ---------- */
+.page{max-width:1180px;margin:0 auto;padding:0 24px 96px;display:grid;gap:48px}
+@media (min-width:1024px){
+  .page{grid-template-columns:232px minmax(0,1fr);align-items:start;gap:64px;padding-top:8px}
+}
+
+/* ---------- masthead ---------- */
+.masthead{grid-column:1/-1;padding:56px 0 32px;border-bottom:1px solid var(--rule)}
+.eyebrow{
+  font-family:"IBM Plex Mono","IBM Plex Sans Thai",monospace;
+  font-size:.72rem;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--ink-faint);margin:0 0 14px;
+}
+h1{
+  font-family:Trirong,"Noto Serif Thai",Georgia,serif;
+  font-weight:600;font-size:clamp(2.1rem,5.5vw,3.1rem);
+  line-height:1.35;margin:0 0 16px;text-wrap:balance;letter-spacing:-.01em;
+}
+.lede{font-size:1.09rem;color:var(--ink-soft);max-width:62ch;margin:0}
+.lede strong{color:var(--ink);font-weight:600}
+
+/* ---------- nav rail ---------- */
+.rail{display:none}
+@media (min-width:1024px){
+  .rail{display:block;position:sticky;top:24px;padding-top:8px}
+}
+.rail p.eyebrow{margin-bottom:10px}
+.rail ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+.rail a{
+  display:block;padding:5px 12px;border-left:2px solid var(--rule);
+  color:var(--ink-soft);text-decoration:none;font-size:.93rem;line-height:1.5;
+}
+.rail a:hover{color:var(--ink);border-left-color:var(--rule-strong)}
+.rail a.active{color:var(--accent-ink);border-left-color:var(--accent);font-weight:600}
+
+/* ---------- content ---------- */
+main{min-width:0;display:flex;flex-direction:column;gap:8px}
+section{padding:44px 0 8px;scroll-margin-top:24px}
+section + section{border-top:1px solid var(--rule)}
+h2{
+  font-family:Trirong,"Noto Serif Thai",Georgia,serif;
+  font-weight:600;font-size:1.72rem;line-height:1.45;
+  margin:0 0 6px;text-wrap:balance;
+}
+h3{font-size:1.06rem;font-weight:600;margin:32px 0 6px;line-height:1.6}
+h3:first-of-type{margin-top:24px}
+p{margin:0 0 14px;max-width:68ch}
+ul,ol{margin:0 0 14px;padding-left:22px;max-width:68ch}
+li{margin:0 0 6px}
+li::marker{color:var(--ink-faint)}
+a{color:var(--accent-ink);text-underline-offset:3px}
+strong{font-weight:600}
+.sub{color:var(--ink-soft);font-size:.95rem}
+hr{border:0;border-top:1px solid var(--rule);margin:28px 0}
+
+code{
+  background:var(--code-bg);border-radius:3px;padding:.1em .38em;
+  font-size:.87em;color:var(--ink);
+}
+
+/* ---------- command block ---------- */
+.cmd{margin:14px 0 20px}
+.cmd .label{
+  font-family:"IBM Plex Mono","IBM Plex Sans Thai",monospace;
+  font-size:.7rem;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--ink-faint);margin-bottom:6px;
+}
+.cmd pre{
+  margin:0;background:var(--surface);border:1px solid var(--rule);
+  padding:14px 16px;overflow-x:auto;font-size:.9rem;line-height:1.7;
+  user-select:all;box-shadow:var(--shadow);
+}
+.cmd pre code{background:none;padding:0;font-size:1em}
+.cmd .after{margin:8px 0 0;font-size:.93rem;color:var(--ink-soft)}
+
+/* ---------- callout ---------- */
+.note{
+  margin:20px 0;padding:16px 18px;background:var(--surface-2);
+  border:1px solid var(--rule);
+}
+.note > .tag{
+  display:inline-block;font-family:"IBM Plex Mono","IBM Plex Sans Thai",monospace;
+  font-size:.68rem;letter-spacing:.14em;text-transform:uppercase;
+  padding:1px 7px;margin-bottom:8px;border:1px solid currentColor;
+}
+.note p:last-child{margin-bottom:0}
+.note.warn{background:var(--warn-tint);border-color:color-mix(in srgb,var(--warn) 30%,transparent)}
+.note.warn > .tag{color:var(--warn)}
+.note.stop{background:var(--danger-tint);border-color:color-mix(in srgb,var(--danger) 30%,transparent)}
+.note.stop > .tag{color:var(--danger)}
+.note.tip{background:var(--accent-tint);border-color:color-mix(in srgb,var(--accent) 30%,transparent)}
+.note.tip > .tag{color:var(--accent-ink)}
+
+/* ---------- tables ---------- */
+.scroller{overflow-x:auto;margin:18px 0 24px;border:1px solid var(--rule);background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:560px;font-size:.95rem}
+th,td{text-align:left;padding:11px 14px;vertical-align:top;border-bottom:1px solid var(--rule)}
+thead th{
+  font-family:"IBM Plex Mono","IBM Plex Sans Thai",monospace;
+  font-size:.68rem;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--ink-faint);font-weight:400;background:var(--surface-2);
+  border-bottom:1px solid var(--rule-strong);white-space:nowrap;
+}
+tbody tr:last-child td{border-bottom:0}
+td code{white-space:nowrap}
+td.said{color:var(--ink);font-size:.9rem}
+td.said em{font-style:normal;color:var(--ink-soft)}
+
+/* ---------- who chip ---------- */
+.who{
+  display:inline-block;font-family:"IBM Plex Mono","IBM Plex Sans Thai",monospace;
+  font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;
+  padding:1px 8px;border:1px solid currentColor;white-space:nowrap;
+}
+.who.bot{color:var(--ink-soft)}
+.who.human{color:var(--accent-ink);background:var(--accent-tint)}
+
+/* ---------- pipeline flow ---------- */
+.flow{
+  display:grid;gap:10px;margin:24px 0 8px;
+  grid-template-columns:1fr;
+}
+@media (min-width:720px){.flow{grid-template-columns:repeat(4,1fr)}}
+.step{
+  background:var(--surface);border:1px solid var(--rule);padding:14px 16px;position:relative;
+}
+.step.human{border-color:var(--accent);background:var(--accent-tint)}
+.step .n{
+  font-family:"IBM Plex Mono","IBM Plex Sans Thai",monospace;
+  font-size:.7rem;letter-spacing:.12em;color:var(--ink-faint);
+}
+.step h4{margin:2px 0 6px;font-size:1rem;font-weight:600;line-height:1.5}
+.step p{margin:0;font-size:.88rem;color:var(--ink-soft);line-height:1.7}
+.step .who{margin-top:10px}
+.step::after{
+  content:"↓";position:absolute;left:50%;bottom:-19px;transform:translateX(-50%);
+  color:var(--ink-faint);font-size:.9rem;line-height:1;
+}
+@media (min-width:720px){
+  .step::after{content:"→";left:auto;right:-16px;bottom:auto;top:50%;transform:translateY(-50%)}
+}
+.flow .step:last-child::after{content:""}
+
+/* ---------- facts box ---------- */
+.facts{
+  margin:20px 0 8px;border:1px solid var(--rule-strong);background:var(--surface);
+  padding:18px 20px;box-shadow:var(--shadow);
+}
+.facts dl{margin:0;display:grid;gap:10px 20px;grid-template-columns:1fr}
+@media (min-width:620px){.facts dl{grid-template-columns:max-content 1fr}}
+.facts dt{
+  font-family:"IBM Plex Mono","IBM Plex Sans Thai",monospace;
+  font-size:.78rem;letter-spacing:.06em;color:var(--ink-faint);padding-top:4px;
+}
+.facts dd{margin:0;font-size:.95rem}
+.facts .foot{margin:16px 0 0;font-size:.88rem;color:var(--ink-soft);border-top:1px solid var(--rule);padding-top:12px}
+
+footer{
+  grid-column:1/-1;border-top:1px solid var(--rule);margin-top:32px;padding-top:20px;
+  font-size:.88rem;color:var(--ink-faint);
+}
+:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+@media (prefers-reduced-motion:no-preference){html{scroll-behavior:smooth}}
+</style>
+
+<div class="page">
+
+  <header class="masthead">
+    <p class="eyebrow">คู่มือผู้ใช้ · ทีมการตลาด</p>
+    <h1>คู่มือบอทการตลาด</h1>
+    <p class="lede">บอทตัวนี้คือ <strong>ผู้ช่วยที่นั่งอยู่หน้าคอมจริง ๆ เครื่องหนึ่ง</strong> แล้วคุณสั่งงานมันผ่าน Discord — ให้หาเทรนด์ เขียนโพสต์ ทำรูป และโพสต์ลงเพจตามเวลาที่คุณวางไว้ คู่มือนี้เขียนให้คนที่ไม่ต้องรู้เรื่องโค้ดเลย อ่านหัวข้อที่ 3 กับ 7 ก็ทำงานได้แล้ว</p>
+  </header>
+
+  <aside class="rail">
+    <p class="eyebrow">หัวข้อ</p>
+    <ol>
+      <li><a href="#what">1 · บอทตัวนี้คืออะไร</a></li>
+      <li><a href="#how">2 · สั่งงานยังไง</a></li>
+      <li><a href="#daily">3 · จากเทรนด์ถึงโพสต์</a></li>
+      <li><a href="#ondemand">4 · สั่งของนอกรอบ</a></li>
+      <li><a href="#schedules">5 · งานอัตโนมัติ</a></li>
+      <li><a href="#approval">6 · ปุ่มขออนุมัติ</a></li>
+      <li><a href="#troubles">7 · อาการ → วิธีแก้</a></li>
+      <li><a href="#glossary">8 · ศัพท์ที่ได้ยินบ่อย</a></li>
+      <li><a href="#operator">9 · เมื่อไรเรียกคนดูแล</a></li>
+    </ol>
+  </aside>
+
+  <main>
+
+    <!-- 1 -->
+    <section id="what">
+      <p class="eyebrow">01</p>
+      <h2>บอทตัวนี้คืออะไร</h2>
+      <p>มันไม่ใช่แชตบอทที่ตอบข้อความอย่างเดียว — มันคือ Claude ที่นั่งอยู่หน้าเครื่อง Mac เครื่องหนึ่งของทีม เปิดไฟล์ได้ เปิดเบราว์เซอร์จริงได้ และโพสต์ลงเพจ Facebook ของแบรนด์ได้จริง คุณคุยกับมันผ่าน Discord เท่านั้น</p>
+
+      <h3>3 อย่างที่ควรรู้ก่อนใช้</h3>
+      <ul>
+        <li><strong>บอทอยู่บนเครื่องจริง</strong> — ถ้าเครื่องนั้นปิด สลีป หรือเน็ตหลุด บอทก็เงียบไปด้วย ไม่มีอะไรทำงานบนคลาวด์</li>
+        <li><strong>บอทใช้บัญชีจริงที่ล็อกอินค้างไว้</strong> — เวลามันโพสต์ Facebook คือโพสต์ในนามเพจจริง ไม่ใช่เดโม และมันทำได้ทีละงาน เพราะมีเบราว์เซอร์อยู่ตัวเดียว</li>
+        <li><strong>ทุกอย่างจดไว้เป็นไฟล์</strong> — เทรนด์ที่เจอ คอนเทนต์ที่เขียน และปฏิทินโพสต์ อยู่ในโฟลเดอร์กลางชื่อ <code>marketing-workspace</code> บนเครื่องนั้น บอทลืมบทสนทนาได้ แต่ไฟล์ไม่หาย</li>
+      </ul>
+
+      <div class="note tip">
+        <div class="tag">สรุปสั้นสุด</div>
+        <p>งานที่บอททำเองทุกวันคือ <strong>หาเทรนด์ → เขียนดราฟต์ → โพสต์ตามปฏิทิน</strong> · งานที่ <strong>คน</strong> ต้องทำคืออย่างเดียว: <strong>เลือกว่าชิ้นไหนขึ้นเมื่อไร แล้วอนุมัติ</strong> ถ้าไม่มีใครอนุมัติ จะไม่มีอะไรถูกโพสต์เลย</p>
+      </div>
+    </section>
+
+    <!-- 2 -->
+    <section id="how">
+      <p class="eyebrow">02</p>
+      <h2>สั่งงานยังไง</h2>
+      <p>ในห้อง Discord ของทีม พิมพ์เครื่องหมาย <code>/</code> แล้วเมนูคำสั่งจะเด้งขึ้นมา เลือกคำสั่ง กรอกช่อง <code>prompt</code> (คือสิ่งที่อยากให้ทำ พิมพ์เป็นภาษาคนได้เลย) แล้วกด Enter</p>
+
+      <div class="cmd">
+        <div class="label">ตัวอย่าง — พิมพ์ในห้องหลักของทีม</div>
+        <pre><code>/task prompt:"สรุปให้หน่อยว่าตอนนี้มีดราฟต์ค้างอยู่กี่ชิ้น อะไรบ้าง"</code></pre>
+        <p class="after">บอทจะตอบว่า <code>🧵 กำลังเปิดเธรดสำหรับ: …</code> แล้วเปิดเธรดใหม่ให้ งานทั้งชิ้นเกิดขึ้นในเธรดนั้น</p>
+      </div>
+
+      <h3>คำสั่งที่ใช้จริง</h3>
+      <div class="scroller">
+      <table>
+        <thead><tr><th>คำสั่ง</th><th>ใช้ตอนไหน</th></tr></thead>
+        <tbody>
+          <tr><td><code>/task</code></td><td>งานหลักทุกอย่าง — บอทเปิดเธรดให้ คุยต่อในเธรดได้เรื่อย ๆ</td></tr>
+          <tr><td><code>/ask</code></td><td>ถามสั้น ๆ ตอบในห้องเดิม ไม่เปิดเธรด · ถามได้อย่างเดียว แก้ไฟล์หรือโพสต์ไม่ได้</td></tr>
+          <tr><td><code>/schedule list</code></td><td>ดูงานอัตโนมัติที่ตั้งไว้ทั้งหมด ว่ารอบต่อไปกี่โมง อันไหนหยุดอยู่</td></tr>
+          <tr><td><code>/stop</code></td><td>สั่งหยุดงานในเธรดที่คุณอยู่ตอนนั้น</td></tr>
+          <tr><td><code>/status</code></td><td>ดูว่าตอนนี้บอทกำลังทำอะไรอยู่ ใครถือเบราว์เซอร์อยู่ ใครต่อคิว</td></tr>
+          <tr><td><code>/help</code></td><td>สรุปคำสั่งย่อ ๆ ใน Discord (เห็นคนเดียว)</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <h3>เธรดคือที่ทำงานของงานนั้น</h3>
+      <ul>
+        <li><strong>คุยต่อได้</strong> — พิมพ์ข้อความธรรมดาในเธรด ไม่ต้องมี <code>/</code> บอทจำเรื่องที่คุยกันมาทั้งเธรด</li>
+        <li><strong>แทรกได้ระหว่างมันทำงาน</strong> — พิมพ์แทรกไปเลย บอทจะติด 👀 บนข้อความคุณ แปลว่ารับเรื่องแล้วและจะเอาไปทำต่อ</li>
+        <li><strong>อยากให้หยุด</strong> — พิมพ์ <code>/stop</code> ในเธรดนั้น</li>
+      </ul>
+
+      <div class="note warn">
+        <div class="tag">ระวังจุดนี้</div>
+        <p>ถ้าคุณสั่ง <code>/task</code> <strong>ซ้ำในเธรดเดิม</strong> = สั่งให้เริ่มงานใหม่ทั้งชิ้น บอทจะลืมที่คุยกันมาก่อนหน้า · อยากสั่งเพิ่มเฉย ๆ ให้พิมพ์เป็นข้อความธรรมดาแทน</p>
+      </div>
+
+      <h3>ข้อความสถานะในเธรด แปลว่าอะไร</h3>
+      <p>ระหว่างทำงาน บอทจะมีข้อความหนึ่งบรรทัดที่แก้ตัวเองไปเรื่อย ๆ นั่นคือ "ตอนนี้กำลังทำอะไรอยู่"</p>
+      <div class="scroller">
+      <table>
+        <thead><tr><th>เห็นแบบนี้</th><th>แปลว่า</th></tr></thead>
+        <tbody>
+          <tr><td class="said">กำลังคิด</td><td>กำลังประมวลผล ยังไม่ได้ลงมือทำอะไรกับเครื่อง</td></tr>
+          <tr><td class="said">กำลังใช้ <em>ชื่อเครื่องมือ</em></td><td>กำลังอ่านไฟล์ / เขียนไฟล์ / กดเว็บอยู่ ปกติดี</td></tr>
+          <tr><td class="said">รอ browser ว่าง — ถือโดย <em>…</em> (คิวที่ 2)</td><td>ไม่ได้ค้าง — เบราว์เซอร์มีตัวเดียว งานอื่นใช้อยู่ ของคุณต่อคิวรออยู่</td></tr>
+          <tr><td class="said">รออนุมัติจากผู้ใช้</td><td>มีปุ่มขึ้นในเธรดรอคุณกด (ดูหัวข้อ 6)</td></tr>
+          <tr><td class="said">❌ งานล้มเหลว: …</td><td>งานจบแบบไม่สำเร็จ อ่านเหตุผลที่ต่อท้าย แล้วสั่งใหม่หรือถามบอทต่อในเธรดได้เลย</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </section>
+
+    <!-- 3 -->
+    <section id="daily">
+      <p class="eyebrow">03 · หัวใจของงาน</p>
+      <h2>จากเทรนด์ถึงโพสต์</h2>
+      <p>คอนเทนต์หนึ่งชิ้นเดินผ่าน 4 ขั้นเสมอ สามขั้นบอททำเองตามเวลา เหลือขั้นที่ 3 ที่เป็นของคน</p>
+
+      <div class="flow">
+        <div class="step">
+          <div class="n">ขั้น 1</div>
+          <h4>ส่องเทรนด์</h4>
+          <p>บอทไล่ดูโซเชียล เจอกระแสอะไรก็จดเก็บไว้เป็นไฟล์</p>
+          <span class="who bot">บอททำเอง</span>
+        </div>
+        <div class="step">
+          <div class="n">ขั้น 2</div>
+          <h4>เขียนดราฟต์</h4>
+          <p>เอาเทรนด์มาเขียนเป็นโพสต์ พร้อมรูปประกอบ กองไว้รอคนเลือก</p>
+          <span class="who bot">บอททำเอง</span>
+        </div>
+        <div class="step human">
+          <div class="n">ขั้น 3</div>
+          <h4>วางปฏิทิน + อนุมัติ</h4>
+          <p>คนเลือกว่าชิ้นไหนขึ้นวันไหนกี่โมง แล้วเซ็นอนุมัติ</p>
+          <span class="who human">คนต้องทำ</span>
+        </div>
+        <div class="step">
+          <div class="n">ขั้น 4</div>
+          <h4>โพสต์ลงเพจ</h4>
+          <p>ถึงเวลาแล้วบอทหยิบไปโพสต์ตามที่อนุมัติไว้ คำต่อคำ</p>
+          <span class="who bot">บอททำเอง</span>
+        </div>
+      </div>
+
+      <p class="sub" style="margin-top:26px">ทำไมต้องแยกขั้น 3 ออกมา: บอทไม่มีสิทธิ์ตัดสินใจว่าอะไรควรออกสู่สาธารณะ <strong>ปฏิทินคือคำสั่งของคน</strong> — ถ้าไม่มีชื่อคนอนุมัติในแถวนั้น บอทจะไม่โพสต์เด็ดขาด</p>
+
+      <h3>ขั้นที่ 3 ทำยังไง</h3>
+      <div class="cmd">
+        <div class="label">พิมพ์ในห้องหลัก (ไม่ใช่ในเธรดเก่า)</div>
+        <pre><code>/task skill:content-calendar prompt:"วางแผนโพสต์อาทิตย์หน้า"</code></pre>
+        <p class="after">บอทจะเสนอแผนมาให้ พร้อม <strong>โชว์ข้อความเต็มและรูปของทุกชิ้น</strong> ในเธรดนั้น ให้คุณอ่านก่อนตัดสินใจ</p>
+      </div>
+      <p>จากนั้นคุยกับมันเป็นภาษาคนได้เลย เช่น <code>เลื่อนวันพุธเป็น 19:00</code> · <code>เอาชิ้นวันศุกร์ออก</code> · <code>สลับชิ้นเช้ากับชิ้นเย็น</code> พอใจแล้วค่อยอนุมัติ</p>
+
+      <div class="cmd">
+        <div class="label">พิมพ์ในเธรดเดิม — ต้องมีชื่อคุณ</div>
+        <pre><code>อนุมัติทั้งอาทิตย์ — สมชาย</code></pre>
+        <p class="after">ชื่อที่คุณพิมพ์จะถูกเซ็นลงในปฏิทินเป็นหลักฐานว่าใครอนุมัติ</p>
+      </div>
+
+      <div class="note stop">
+        <div class="tag">3 กฎที่ทำให้ "โพสต์ไม่ขึ้น" — จำไว้ให้ขึ้นใจ</div>
+        <p><strong>1. แถวไหนไม่มีชื่อผู้อนุมัติ = ไม่ถูกโพสต์</strong> และจะไม่มีใครเตือนคุณด้วย มันเงียบไปเฉย ๆ · วางแผนแล้วต้องอนุมัติเสมอ</p>
+        <p><strong>2. แก้เนื้อดราฟต์หลังอนุมัติแล้ว = การอนุมัติเป็นโมฆะทันที</strong> ต้องกลับไปอนุมัติใหม่ · กติกานี้มีไว้กันของที่คนยังไม่ได้อ่านหลุดออกเพจ</p>
+        <p><strong>3. เวลาในปฏิทินแปลว่า "ไม่ก่อนเวลานี้" ไม่ใช่ "ตรงเวลานี้เป๊ะ"</strong> บอทตื่นมาดูปฏิทินเป็นรอบ ๆ ชิ้นที่ตั้งไว้ 13:00 จะขึ้นในรอบตรวจแรกหลังจากนั้น อาจเป็น 13:30</p>
+      </div>
+
+      <h3>ของด่วน อยากขึ้นเดี๋ยวนี้</h3>
+      <p>ไม่มีทางลัดข้ามปฏิทิน (ตั้งใจออกแบบไว้แบบนั้น) แต่ทำได้เร็วแบบนี้: สั่ง <code>content-calendar</code> ให้ใส่ช่องเวลาเป็นเวลาตอนนี้ → อนุมัติ → แล้วสั่งให้รอบโพสต์ทำงานเดี๋ยวนั้นเลยด้วย <code>/schedule run</code> (ดูหัวข้อ 5)</p>
+    </section>
+
+    <!-- 4 -->
+    <section id="ondemand">
+      <p class="eyebrow">04</p>
+      <h2>สั่งของนอกรอบ</h2>
+      <p>ไม่ต้องรอรอบอัตโนมัติ อยากได้อะไรสั่งได้เลยด้วย <code>/task</code> แล้วเลือกช่อง <code>skill</code> — สกิลคือ "สูตรงาน" ที่สอนบอทไว้แล้วว่างานแบบนี้ต้องทำยังไง ถ้าไม่เลือก บอทจะเดาเองจากสิ่งที่คุณพิมพ์ (ส่วนใหญ่เดาถูก แต่เลือกเองชัวร์กว่า)</p>
+
+      <div class="scroller">
+      <table>
+        <thead><tr><th>สกิล</th><th>ทำอะไร</th><th>ใคร</th></tr></thead>
+        <tbody>
+          <tr><td><code>content-calendar</code></td><td>วางแผน แก้ และอนุมัติปฏิทินโพสต์ประจำสัปดาห์</td><td><span class="who human">คนสั่ง</span></td></tr>
+          <tr><td><code>evergreen-maker</code></td><td>เขียนคอนเทนต์จากโจทย์ที่คุณบอก ไม่ต้องเกาะเทรนด์ (แนะนำสินค้า โปรโมชัน how-to) — ของแบบนี้ไม่มีวันหมดอายุ เก็บไว้ใช้เมื่อไรก็ได้</td><td><span class="who human">คนสั่ง</span></td></tr>
+          <tr><td><code>review-draft</code></td><td>ดู/แก้/ตีกลับดราฟต์ทีละชิ้น สั่งทำรูปใหม่ หรือกู้ชิ้นที่โพสต์พลาด</td><td><span class="who human">คนสั่ง</span></td></tr>
+          <tr><td><code>image-gen</code></td><td>สั่งสร้างรูปผ่าน ChatGPT แล้วส่งไฟล์รูปกลับมาให้ในเธรด</td><td><span class="who human">คนสั่ง</span></td></tr>
+          <tr><td><code>trend-scout</code></td><td>ส่องเทรนด์ในโซเชียลแล้วจดเก็บไว้</td><td><span class="who bot">อัตโนมัติ</span></td></tr>
+          <tr><td><code>content-maker</code></td><td>เอาเทรนด์ที่จดไว้มาเขียนเป็นดราฟต์พร้อมรูป</td><td><span class="who bot">อัตโนมัติ</span></td></tr>
+          <tr><td><code>fb-publisher</code></td><td>โพสต์ชิ้นที่ปฏิทินบอกว่าถึงเวลาแล้ว — ห้ามแก้ข้อความแม้แต่ตัวเดียว</td><td><span class="who bot">อัตโนมัติ</span></td></tr>
+          <tr><td><code>workspace-janitor</code></td><td>เก็บไฟล์ที่จบงานแล้วเข้ากรุ และรายงานชิ้นที่ค้างผิดปกติ</td><td><span class="who bot">อัตโนมัติ</span></td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <div class="cmd">
+        <div class="label">อยากได้คอนเทนต์แนะนำสินค้า ไม่เกาะเทรนด์</div>
+        <pre><code>/task skill:evergreen-maker prompt:"ทำโพสต์แนะนำ AI Card 3 ชิ้น คนละมุม"</code></pre>
+        <p class="after">ได้มาแล้วยังไม่ขึ้นเพจ — ต้องเอาไปใส่ปฏิทินและอนุมัติก่อนเสมอ</p>
+      </div>
+
+      <div class="cmd">
+        <div class="label">อยากแก้ดราฟต์ที่มีอยู่</div>
+        <pre><code>/task skill:review-draft prompt:"ขอดูดราฟต์ที่ยังไม่ได้ลงปฏิทินทั้งหมด"</code></pre>
+        <p class="after">แล้วคุยต่อในเธรดได้เลย เช่น <code>ชิ้นที่ 2 ตัดย่อหน้าสุดท้ายออก</code> หรือ <code>ชิ้นนี้ไม่เอา ตีกลับ</code></p>
+      </div>
+
+      <div class="cmd">
+        <div class="label">อยากได้รูปเฉย ๆ</div>
+        <pre><code>/task skill:image-gen prompt:"รูปนามบัตร NFC สีชมพูวางบนโต๊ะไม้ แสงธรรมชาติ"</code></pre>
+        <p class="after">บอทจะแนบไฟล์รูปกลับมาในเธรด โหลดไปใช้ได้เลย</p>
+      </div>
+    </section>
+
+    <!-- 5 -->
+    <section id="schedules">
+      <p class="eyebrow">05</p>
+      <h2>งานอัตโนมัติ</h2>
+      <p>งานที่บอททำเองซ้ำ ๆ ตามเวลาเรียกว่า <strong>schedule</strong> แต่ละอันมีเธรดถาวรของตัวเอง ทุกรอบที่มันทำงานจะรายงานต่อกันในเธรดนั้น ย้อนดูได้ว่ารอบไหนเกิดอะไร</p>
+
+      <div class="cmd">
+        <div class="label">ดูว่ามีอะไรตั้งไว้บ้าง</div>
+        <pre><code>/schedule list</code></pre>
+      </div>
+
+      <p>แต่ละบรรทัดอ่านแบบนี้ — ไอคอนหน้าสุดบอกสถานะ ตามด้วยรหัส (id) ที่เอาไปใช้สั่งงานต่อ, รอบเวลา, รอบถัดไปกี่โมง, ลิงก์เธรด และเจ้าของ</p>
+      <div class="scroller">
+      <table>
+        <thead><tr><th>ไอคอน</th><th>แปลว่า</th></tr></thead>
+        <tbody>
+          <tr><td class="said">🟢</td><td>กำลังทำงานอยู่ตอนนี้</td></tr>
+          <tr><td class="said">⚪</td><td>ปกติ รอถึงรอบถัดไป</td></tr>
+          <tr><td class="said">⏸️</td><td>หยุดอยู่ — ไม่ทำงานจนกว่าจะมีคนสั่งให้กลับมา</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <h3>สั่งอะไรได้บ้าง</h3>
+      <div class="scroller">
+      <table>
+        <thead><tr><th>คำสั่ง</th><th>ทำอะไร</th><th>ใครสั่งได้</th></tr></thead>
+        <tbody>
+          <tr><td><code>/schedule pause id:…</code></td><td><strong>เบรกฉุกเฉิน</strong> — หยุดงานนั้นไว้ก่อน เช่นรู้ว่าคอนเทนต์มีปัญหาแล้วยังไม่อยากให้โพสต์อะไรออกไปอีก</td><td>ทุกคน</td></tr>
+          <tr><td><code>/schedule resume id:…</code></td><td>ปลุกให้กลับมาทำงานตามรอบเหมือนเดิม</td><td>เจ้าของ + คนดูแล</td></tr>
+          <tr><td><code>/schedule run id:…</code></td><td>สั่งให้ทำเดี๋ยวนี้ 1 รอบ ไม่ต้องรอเวลา</td><td>เจ้าของ + คนดูแล</td></tr>
+          <tr><td><code>/schedule create …</code></td><td>ตั้งงานอัตโนมัติอันใหม่ — <strong>ต้องสั่งในห้องหลักเท่านั้น สั่งในเธรดไม่ได้</strong></td><td>ทุกคน</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <p class="sub">ตั้งงานอัตโนมัติเพิ่มเองได้ แต่<strong>บอกคนดูแลด้วยทุกครั้ง</strong> — ตั้งถี่เกินไปแต่ละรอบจะแย่งเบราว์เซอร์กันจนรอไม่ทันแล้วกลายเป็นรอบล้มเหลว · รอบโพสต์วันละ 3–6 รอบคือช่วงที่ปลอดภัย</p>
+
+      <div class="note warn">
+        <div class="tag">บอทหยุดเองได้</div>
+        <p>ถ้า schedule อันไหน <strong>ล้มเหลว 3 รอบติดกัน</strong> บอทจะพักมันเองแล้วแท็กเจ้าของว่า <code>⏸️ … หยุดตัวเองแล้ว — ล้มเหลว 3 รอบติด</code> · อาการที่คุณจะสังเกตเห็นคือ "อยู่ ๆ ก็ไม่มีโพสต์ขึ้นเลย" — เช็คด้วย <code>/schedule list</code> ว่ามี ⏸️ ไหม แก้ต้นเหตุก่อนแล้วค่อย <code>resume</code></p>
+      </div>
+    </section>
+
+    <!-- 6 -->
+    <section id="approval">
+      <p class="eyebrow">06</p>
+      <h2>ปุ่มขออนุมัติ</h2>
+      <p>บางครั้งบอทจะขึ้นกล่อง <code>⚠️ ขออนุมัติ</code> พร้อมปุ่ม 3 ปุ่มในเธรด แปลว่ามันกำลังจะทำอะไรที่ย้อนกลับไม่ได้และอยากให้คนยืนยันก่อน</p>
+      <p><strong>ตอนนี้เครื่องตั้งไว้ให้ผ่านเกือบทุกอย่างโดยไม่ถาม</strong> — สิ่งที่ยังถามเสมอคือ <strong>คำสั่งที่ลบไฟล์หรือล้างงานทิ้ง</strong> ฉะนั้นถ้าเห็นปุ่มนี้ ให้ถือว่าเป็นเรื่องใหญ่และอ่านให้ดี</p>
+
+      <ul>
+        <li><strong>อ่านบรรทัดบนสุด</strong> — บอทแปลคำสั่งเป็นภาษาคนไว้ให้แล้ว เช่น "ลบ <code>build</code> ทั้งโฟลเดอร์รวมทุกอย่างข้างใน — ไม่ได้เข้าถังขยะ กู้คืนไม่ได้" · คำอธิบายนี้บอทถอดจากตัวคำสั่งเอง ไม่ใช่คำที่ตัวมันเขียนมาเอง เชื่อได้</li>
+        <li><strong>ถ้าไม่ใช่สิ่งที่คุณสั่ง กด "ปฏิเสธ"</strong> — ปฏิเสธไม่ทำให้อะไรพัง บอทจะหาทางอื่นหรืออธิบายว่าติดตรงไหน</li>
+        <li>ถ้าเห็นข้อความว่า "บอทไม่รู้จักคำสั่งนี้ จึงอธิบายให้ไม่ได้" = ไม่แน่ใจให้ปฏิเสธไว้ก่อน แล้วถามคนดูแล</li>
+        <li><strong>ไม่มีใครกดภายใน 10 นาที = ถือว่าปฏิเสธอัตโนมัติ</strong></li>
+        <li>กดได้เฉพาะ <strong>คนที่สั่งงานนั้น</strong> กับ <strong>คนดูแลบอท</strong> — คนอื่นกดจะขึ้นว่าไม่มีสิทธิ์</li>
+      </ul>
+
+      <p class="sub">ปุ่ม "อนุมัติและจำไว้" = อนุญาตแบบเดียวกันนี้ไปจนจบงานชิ้นนั้น ไม่ต้องกดซ้ำ (จำแค่ในงานนั้น ไม่ข้ามไปงานอื่น) · ถ้าวันไหนคุณเริ่มเห็นปุ่มขออนุมัติบ่อยกว่าที่เขียนไว้ตรงนี้ แปลว่าคนดูแลปรับให้บอทระวังตัวมากขึ้นแล้ว ไม่ใช่บอทเสีย</p>
+    </section>
+
+    <!-- 7 -->
+    <section id="troubles">
+      <p class="eyebrow">07 · เปิดหน้านี้ตอนมีปัญหา</p>
+      <h2>อาการ → วิธีแก้</h2>
+      <p>หาแถวที่ตรงกับ <strong>ข้อความที่คุณเห็นจริง ๆ</strong> บนจอ</p>
+
+      <div class="scroller">
+      <table>
+        <thead><tr><th>คุณเห็น / คุณเจอ</th><th>แปลว่า</th><th>ทำยังไง</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="said">โพสต์ที่วางไว้ไม่ขึ้นเพจ แต่ไม่มี error อะไรเลย</td>
+            <td>เกือบทุกครั้งคือ 1 ใน 3 กฎในหัวข้อ 3: ไม่มีชื่อผู้อนุมัติ / แก้ดราฟต์หลังอนุมัติ / ยังไม่ถึงรอบตรวจถัดไป</td>
+            <td>สั่ง <code>/task skill:content-calendar prompt:"เช็คให้หน่อยว่าทำไมชิ้น … ยังไม่ขึ้น"</code> — บอทเช็คให้ครบทั้ง 3 ข้อ</td>
+          </tr>
+          <tr>
+            <td class="said">บอทนี้จำกัดเฉพาะทีมภายใน บัญชีของคุณไม่อยู่ในรายการที่อนุญาต</td>
+            <td>Discord ของคุณยังไม่ถูกเพิ่มเข้าทีม</td>
+            <td>ทักคนดูแลให้เพิ่มให้</td>
+          </tr>
+          <tr>
+            <td class="said">ตั้ง schedule ได้ในห้องข้อความหลักของเซิร์ฟเวอร์เท่านั้น (ไม่ใช่ในเธรด)</td>
+            <td>คุณสั่งอยู่ในเธรด</td>
+            <td>กลับไปห้องหลักแล้วสั่งใหม่</td>
+          </tr>
+          <tr>
+            <td class="said">เธรดนี้เป็นของ schedule — สั่งรอบใหม่ด้วย <code>/schedule run</code></td>
+            <td>เธรดนี้เป็นของงานอัตโนมัติ ห้ามเอามาเปิดงานใหม่ทับ</td>
+            <td>อยากให้รันเดี๋ยวนี้ใช้ <code>/schedule run id:…</code> · อยากสั่งงานอื่นให้เปิด <code>/task</code> ในห้องหลัก</td>
+          </tr>
+          <tr>
+            <td class="said">รอ browser ว่าง — ถือโดย … (คิวที่ 2)</td>
+            <td>ปกติ ไม่ได้ค้าง — เบราว์เซอร์มีตัวเดียว งานคุณต่อคิวอยู่ พอถึงคิวจะไปต่อเอง</td>
+            <td>รอ · อยากดูภาพรวมว่าใครถืออยู่ใช้ <code>/status</code> · ไม่อยากรอแล้วก็ <code>/stop</code></td>
+          </tr>
+          <tr>
+            <td class="said">♻️ งานถูกขัดจังหวะเพราะบอทรีสตาร์ต</td>
+            <td>บอทเพิ่งถูกเปิดใหม่ระหว่างที่งานคุณทำอยู่</td>
+            <td>พิมพ์ต่อในเธรดเดิมได้เลย มันทำต่อจากเดิม</td>
+          </tr>
+          <tr>
+            <td class="said">♻️ บริบทเดิมของเธรดนี้หมดอายุแล้ว</td>
+            <td>ความจำภายในของงานนั้นบนเครื่องหายไปแล้ว — เจอกับเธรดเก่ามาก ๆ หรือหลังเครื่องถูกล้างประวัติ · <strong>ไม่ใช่</strong>เพราะเธรดเงียบไปพักหนึ่ง (เงียบเฉย ๆ พิมพ์ต่อได้ปกติ)</td>
+            <td>พิมพ์อีกครั้งได้เลย บอทจะเริ่มให้ใหม่ — เล่าบริบทที่จำเป็นซ้ำอีกรอบ ข้อความเก่าในเธรดยังอ่านได้อยู่</td>
+          </tr>
+          <tr>
+            <td class="said">⏸️ … หยุดตัวเองแล้ว — ล้มเหลว 3 รอบติด</td>
+            <td>งานอัตโนมัติอันนั้นพักตัวเองแล้ว จะไม่ทำงานอีกจนกว่าจะปลุก</td>
+            <td>เปิดเธรดของมันอ่านว่ารอบก่อน ๆ ล้มเพราะอะไร แก้ต้นเหตุ แล้ว <code>/schedule resume id:…</code></td>
+          </tr>
+          <tr>
+            <td class="said">❌ รอบนี้ล้มเหลว: …</td>
+            <td>รอบนั้นทำไม่จบ (เน็ตหลุด เว็บเด้ง login ฯลฯ) รอบถัดไปยังทำงานตามปกติ</td>
+            <td>ถ้าล้มซ้ำ ๆ ให้เรียกคนดูแล — บ่อยที่สุดคือเพจหลุด login</td>
+          </tr>
+          <tr>
+            <td class="said">บอทเงียบทั้งวัน ไม่มีรอบไหนทำงานเลย</td>
+            <td>เครื่องที่บอทรันอยู่ปิด สลีป หรือบอทไม่ได้เปิดอยู่</td>
+            <td>เรียกคนดูแลไปเปิดเครื่อง/เปิดบอท — ไม่มีใครสั่งจาก Discord ได้</td>
+          </tr>
+          <tr>
+            <td class="said">ดราฟต์ขึ้นสถานะ <code>missed</code></td>
+            <td>เลยวันของช่องเวลาที่วางไว้แล้วยังไม่ได้ขึ้น</td>
+            <td>ให้ช่องเวลาใหม่ด้วย <code>content-calendar</code> แล้วอนุมัติอีกครั้ง</td>
+          </tr>
+          <tr>
+            <td class="said">ดราฟต์ขึ้นสถานะ <code>post-failed</code></td>
+            <td>บอทเริ่มโพสต์แล้วมีอะไรพังกลางทาง — <strong>ต้องมีคนไปดูหน้าเพจก่อนว่าตกลงโพสต์ติดไปหรือเปล่า</strong></td>
+            <td>เปิดเพจดูด้วยตาก่อน แล้วสั่ง <code>/task skill:review-draft</code> บอกมันว่าเห็นอะไร — บอทจะไม่โพสต์ซ้ำเอง</td>
+          </tr>
+          <tr>
+            <td class="said">รูปที่ขอไม่มา หรือเว็บที่บอทเปิดค้างหน้า login</td>
+            <td>บัญชีบนเบราว์เซอร์ของบอทหลุด หรือมีหน้าต่าง Chrome ของคนค้างอยู่</td>
+            <td>เรียกคนดูแล — เขาต้องล็อกอินใหม่แล้ว<strong>ปิดหน้าต่างนั้น</strong> ไม่งั้นรอบต่อไปของบอทเปิดเบราว์เซอร์ไม่ขึ้น</td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+    </section>
+
+    <!-- 8 -->
+    <section id="glossary">
+      <p class="eyebrow">08</p>
+      <h2>ศัพท์ที่ได้ยินบ่อย</h2>
+      <div class="scroller">
+      <table>
+        <thead><tr><th>คำ</th><th>แปลเป็นภาษาคน</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Task</strong> (งาน)</td><td>งานหนึ่งชิ้นที่คุณสั่ง = 1 เธรด · คุยต่อในเธรดได้จนกว่าจะพอใจ</td></tr>
+          <tr><td><strong>Draft</strong> (ดราฟต์)</td><td>คอนเทนต์หนึ่งชิ้น = ข้อความโพสต์ + รูป · ยังไม่ขึ้นเพจจนกว่าจะมีคนวางลงปฏิทินและอนุมัติ</td></tr>
+          <tr><td><strong>Trend</strong> (เทรนด์)</td><td>กระแสที่บอทเจอบนโซเชียลแล้วจดไว้เป็นวัตถุดิบ</td></tr>
+          <tr><td><strong>ปฏิทิน</strong> (Content Calendar)</td><td>แผนโพสต์ของสัปดาห์ — ชิ้นไหนขึ้นเมื่อไร ใครอนุมัติ · <strong>เป็นของคน บอทห้ามแก้เอง</strong></td></tr>
+          <tr><td><strong>Slot</strong> (ช่องเวลา)</td><td>หนึ่งแถวในปฏิทิน = เวลาหนึ่งช่อง + ดราฟต์หนึ่งชิ้น · เวลาหมายถึง "ไม่ก่อนเวลานี้"</td></tr>
+          <tr><td><strong>Schedule</strong> (งานอัตโนมัติ)</td><td>กลไกตั้งเวลาของบอท ทำให้มันตื่นมาทำงานเอง — <strong>คนละอย่างกับปฏิทิน</strong></td></tr>
+          <tr><td><strong>Skill</strong> (สกิล)</td><td>สูตรงานสำเร็จรูปที่สอนบอทไว้แล้ว เลือกได้ตอนสั่งงาน</td></tr>
+          <tr><td><strong>Workspace</strong></td><td>โฟลเดอร์กลางบนเครื่องที่เก็บทุกอย่างของทีม — เทรนด์ ดราฟต์ รูป ปฏิทิน</td></tr>
+          <tr><td><strong>Operator</strong> (คนดูแล)</td><td>เจ้าของเครื่องที่บอทรันอยู่ คนเดียวที่แก้การตั้งค่า ล็อกอินเว็บ และเปิด-ปิดบอทได้</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </section>
+
+    <!-- 9 -->
+    <section id="operator">
+      <p class="eyebrow">09</p>
+      <h2>เมื่อไรต้องเรียกคนดูแล</h2>
+      <ul>
+        <li>บอทออฟไลน์ / เงียบทั้งวัน / เครื่องปิด</li>
+        <li>เว็บที่บอทต้องใช้เด้งหน้า login (Facebook หรือเว็บทำรูป)</li>
+        <li>อยากเพิ่มคนเข้าทีมให้สั่งบอทได้</li>
+        <li>อยากได้สกิลใหม่ หรืออยากแก้บุคลิก/โทนของแบรนด์ที่บอทใช้เขียน</li>
+        <li>เห็นปุ่มขออนุมัติที่ดูไม่เข้าท่า — ปฏิเสธไว้ก่อน แล้วค่อยถาม</li>
+      </ul>
+
+      <div class="facts">
+        <p class="eyebrow" style="margin-bottom:14px">ค่าตั้งของเครื่องนี้ · ณ 20 ส.ค. 2026</p>
+        <dl>
+          <dt>โฟลเดอร์งานกลาง</dt><dd><code>~/Desktop/marketing-workspace</code></dd>
+          <dt>ปุ่มขออนุมัติ</dt><dd>ถามเฉพาะคำสั่งที่ลบไฟล์ · เรื่องอื่นผ่านหมด</dd>
+          <dt>เบราว์เซอร์</dt><dd>ใช้ได้เลยไม่ต้องขออนุมัติ · มีตัวเดียว ใช้ทีละงาน</dd>
+          <dt>หมดเวลารออนุมัติ</dt><dd>10 นาที (ไม่มีใครกด = ปฏิเสธ)</dd>
+          <dt>เธรดที่เงียบไปพัก</dt><dd>เกิน 30 นาที บอทพักงานนั้นไว้ไม่ให้กินเครื่อง — พิมพ์ต่อได้เหมือนเดิม บทสนทนาไม่หาย</dd>
+          <dt>หน้าจอดูสถานะ</dt><dd><code>http://127.0.0.1:4610</code> — <strong>เปิดได้เฉพาะตอนบอทกำลังเปิดอยู่ และเปิดจากเครื่องที่บอทรันเท่านั้น</strong> · เปิดจากเครื่องอื่น หรือเปิดตอนบอทปิดอยู่ = หน้าเว็บไม่ขึ้น (ไม่ใช่ลิงก์เสีย) · ดูอย่างเดียว สั่งงานไม่ได้</dd>
+        </dl>
+        <p class="foot">ค่าพวกนี้คนดูแลเปลี่ยนได้ ถ้าสิ่งที่เห็นบนจอไม่ตรงกับที่เขียนไว้ ให้เชื่อหน้าจอแล้วถามคนดูแล</p>
+      </div>
+    </section>
+
+  </main>
+
+  <footer>
+    คู่มือนี้เขียนสำหรับคนใช้งาน — คนที่ดูแลหรือแก้ตัวบอทเอง อ่าน <code>README.md</code> และ <code>docs/adr/</code> ในโปรเจกต์แทน
+  </footer>
+</div>
+
+<script>
+(function () {
+  var links = Array.prototype.slice.call(document.querySelectorAll('.rail a'));
+  if (!links.length || !('IntersectionObserver' in window)) return;
+  var byId = {};
+  links.forEach(function (a) { byId[a.getAttribute('href').slice(1)] = a; });
+  var seen = {};
+  var observer = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) { seen[e.target.id] = e.isIntersecting; });
+    var current = null;
+    Object.keys(byId).forEach(function (id) { if (seen[id] && !current) current = id; });
+    links.forEach(function (a) { a.classList.remove('active'); });
+    if (current) byId[current].classList.add('active');
+  }, { rootMargin: '-10% 0px -70% 0px' });
+  Object.keys(byId).forEach(function (id) {
+    var el = document.getElementById(id);
+    if (el) observer.observe(el);
+  });
+})();
+</script>
